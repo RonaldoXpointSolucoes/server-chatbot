@@ -964,6 +964,34 @@ export default function BotsList() {
     setIsModalOpen(true);
   };
 
+  const handleToggleAiBotStatus = async (bot: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextStatus = bot.status === 'active' ? 'inactive' : 'active';
+    try {
+      const { data, error } = await supabase
+        .from('bots')
+        .update({ status: nextStatus })
+        .eq('id', bot.id)
+        .select()
+        .single();
+      if (error) throw error;
+      if (data) {
+        setBots(prev => prev.map(b => b.id === bot.id ? data : b));
+        await useChatStore.getState().logOperation('UPDATE', 'bots', bot.id, bot, data);
+        window.dispatchEvent(new CustomEvent('toast', {
+          detail: {
+            message: nextStatus === 'active'
+              ? `🟢 Robô "${bot.name}" ATIVADO e pronto para responder!`
+              : `⚪ Robô "${bot.name}" DESATIVADO. Ele não responderá no WhatsApp.`,
+            type: nextStatus === 'active' ? 'success' : 'info'
+          }
+        }));
+      }
+    } catch (err: any) {
+      alert('Erro ao alterar status do robô: ' + (err.message || String(err)));
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (confirm("Deseja realmente remover este Robô de I.A?")) {
       const botBefore = bots.find(b => b.id === id);
@@ -1527,17 +1555,73 @@ Instruções importantes:
       onInputCapture={() => { isProfileDirtyRef.current = true; }}
       onChangeCapture={() => { isProfileDirtyRef.current = true; }}
     >
-      {/* Premium Header - Glassmorphism Extremo (shrink-0 garante que nunca seja esmagado) */}
-      <div className="shrink-0 px-4 sm:px-8 pt-6 pb-5 bg-gradient-to-b from-[#18181b]/95 to-[#0f1013]/80 backdrop-blur-[40px] border-b border-white/5 relative overflow-hidden z-10 shadow-[0_10px_50px_-20px_rgba(0,0,0,0.8)]">
-        
-        {/* Background Effects Soft */}
-        <div className="absolute -top-32 -left-32 w-[600px] h-[600px] bg-indigo-500/10 rounded-full blur-[140px] pointer-events-none" />
-        <div className="absolute top-0 right-10 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
+      {/* Compact Executive Header - Máxima área de trabalho útil */}
+      <div className="shrink-0 px-4 sm:px-6 py-3 bg-[#14151a]/95 backdrop-blur-2xl border-b border-white/[0.07] relative overflow-hidden z-10 shadow-md">
+        <div className="max-w-[1280px] mx-auto relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Esquerda: Título Compacto + Empresa + Status Ao Vivo */}
+          <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+            <div className="p-2 rounded-xl bg-white/[0.04] border border-white/10 flex items-center justify-center shrink-0">
+              {automationMode === 'ai' ? (
+                <BrainCircuit className="w-5 h-5 text-indigo-400" />
+              ) : (
+                <Waypoints className="w-5 h-5 text-emerald-400" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-base sm:text-lg font-black text-white tracking-tight">
+                  {automationMode === 'ai' ? 'Agentes com I.A. (RAG)' : 'Fluxos de Bot (Typebot)'}
+                </h1>
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/25 px-2.5 py-0.5 rounded-lg">
+                  <Store className="w-3 h-3 text-indigo-400" />
+                  {tenantInfo?.name || 'Empresa Atual'}
+                </span>
+                {activeFlowsCount > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-200 bg-emerald-950/80 border border-emerald-400/50 px-2.5 py-0.5 rounded-lg">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    Ativo: {activeFlowsNames.length > 1 ? `${activeFlowsNames.length} Fluxos` : `"${activeFlowName || 'Atendimento'}"`}
+                  </span>
+                ) : activeBots.length > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-300 bg-indigo-950/60 border border-indigo-500/40 px-2.5 py-0.5 rounded-lg">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                    {activeBots.length} Robô(s) I.A. Ativo(s)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 bg-white/[0.03] border border-white/10 px-2.5 py-0.5 rounded-lg">
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                    Nenhum bot ativo
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
 
-        <div className="max-w-[1200px] mx-auto relative z-10">
-          {/* Master Selector: Robô com I.A. vs Fluxos de Bot (Estilo Typebot) */}
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex flex-wrap p-1.5 bg-black/50 border border-white/10 rounded-2xl backdrop-blur-2xl shadow-2xl">
+          {/* Direita: Seletor de Modo + Sub-abas IA */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex p-1 bg-black/50 border border-white/10 rounded-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setAutomationMode('typebot');
+                  setSearchParams({ tab: 'typebot' });
+                }}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                  automationMode === 'typebot'
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm"
+                    : "text-white/50 hover:text-white/90"
+                )}
+              >
+                <Waypoints className="w-3.5 h-3.5" />
+                <span>Fluxos de Bot</span>
+                <span className={cn(
+                  "text-[10px] px-1.5 py-0.2 rounded-full font-mono",
+                  activeFlowsCount > 0 ? "bg-black/30 text-emerald-200" : "bg-white/10 text-white/50"
+                )}>
+                  {activeFlowsCount}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -1545,174 +1629,50 @@ Instruções importantes:
                   setSearchParams({ tab: 'ai' });
                 }}
                 className={cn(
-                  "px-4 sm:px-5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
                   automationMode === 'ai'
-                    ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40 scale-[1.01]"
-                    : "text-white/50 hover:text-white/90 hover:bg-white/[0.04]"
+                    ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-sm"
+                    : "text-white/50 hover:text-white/90"
                 )}
               >
-                <BrainCircuit className="w-4 h-4 text-indigo-300" />
-                <span>Robôs com I.A. (Gemini / RAG)</span>
-                {activeBots.length > 0 ? (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 font-mono font-bold animate-pulse">
-                    🟢 {activeBots.length} Ativo{activeBots.length > 1 ? 's' : ''}
-                  </span>
-                ) : (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/50 font-mono">
-                    ⚪ 0 Ativos
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setAutomationMode('typebot');
-                  setSearchParams({ tab: 'typebot' });
-                }}
-                className={cn(
-                  "px-4 sm:px-5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative",
-                  automationMode === 'typebot'
-                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30 border border-emerald-400/40 scale-[1.01]"
-                    : "text-white/50 hover:text-white/90 hover:bg-white/[0.04]"
-                )}
-              >
-                <Waypoints className="w-4 h-4 text-emerald-300" />
-                <span>Fluxos de Bot (Estilo Typebot - Sem I.A.)</span>
-                {activeFlowsCount > 0 ? (
-                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 font-mono font-bold flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.3)]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                    EM PRODUÇÃO ({activeFlowsCount})
-                  </span>
-                ) : (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/50 font-mono">
-                    0 Ativos
-                  </span>
-                )}
+                <BrainCircuit className="w-3.5 h-3.5" />
+                <span>Robôs com I.A.</span>
+                <span className={cn(
+                  "text-[10px] px-1.5 py-0.2 rounded-full font-mono",
+                  activeBots.length > 0 ? "bg-black/30 text-indigo-200" : "bg-white/10 text-white/50"
+                )}>
+                  {activeBots.length}
+                </span>
               </button>
             </div>
 
-            {/* Empresa Selecionada + Status em Evidência do WhatsApp */}
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-white/90 bg-white/[0.05] border border-white/15 px-3 py-1.5 rounded-xl">
-                <Store className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Empresa: <strong className="text-indigo-300">{tenantInfo?.name || 'Empresa Atual'}</strong></span>
-              </div>
-              {activeFlowsCount > 0 ? (
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-200 bg-gradient-to-r from-emerald-950/90 to-teal-950/80 border-2 border-emerald-400/60 px-3.5 py-1.5 rounded-xl backdrop-blur-md shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-                  </span>
-                  <span>
-                    🟢 BOOT ON-LINE NO WHATSAPP:{' '}
-                    {activeFlowsNames.length > 1
-                      ? activeFlowsNames.map((n, i) => `${i + 1}º "${n}"`).join(' + ')
-                      : `Fluxo "${activeFlowName || 'Atendimento'}"`}
-                  </span>
-                </div>
-              ) : activeBots.length > 0 ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300 bg-indigo-950/50 border border-indigo-500/40 px-3 py-1.5 rounded-xl backdrop-blur-md shadow-lg shadow-indigo-950/50">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-                  <span>WhatsApp: {activeBots.length} Robô(s) de I.A. em Produção</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-zinc-400 bg-white/[0.03] border border-white/10 px-3 py-1.5 rounded-xl">
-                  <span className="w-2 h-2 rounded-full bg-zinc-500" />
-                  <span>Nenhum robô ou fluxo ativo</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Banner de Governança Explicativo em Evidência */}
-          {activeFlowsCount > 0 && automationMode === 'ai' && (
-            <div className="mb-4 p-3 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-teal-950/30 to-indigo-950/40 border border-emerald-500/30 text-xs flex items-center justify-between gap-3 shadow-lg">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                  <Waypoints className="w-4 h-4 text-emerald-400" />
-                </div>
-                <div>
-                  <p className="font-bold text-emerald-300 flex items-center gap-1.5">
-                    <span>Atenção: Seu WhatsApp está rodando o Fluxo Determinístico "{activeFlowName || 'Atendimento'}"</span>
-                    <span className="text-[10px] bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.2 rounded-full font-mono">
-                      Prioritário
-                    </span>
-                  </p>
-                  <p className="text-zinc-400 text-[11px] mt-0.5">
-                    Enquanto houver um fluxo ativo no Typebot, ele atende os clientes no WhatsApp sem custo de tokens de IA. Para usar robôs com IA, desative o fluxo ou configure palavras-chave específicas.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setAutomationMode('typebot');
-                  setSearchParams({ tab: 'typebot' });
-                }}
-                className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600/40 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-500/40 font-semibold text-xs transition-colors flex items-center gap-1.5"
-              >
-                Ver Fluxo em Uso
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-               <div className="p-2.5 rounded-2xl bg-white/[0.03] border border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] flex items-center justify-center">
-                 {automationMode === 'ai' ? (
-                   <BrainCircuit className="w-6 h-6 text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
-                 ) : (
-                   <Waypoints className="w-6 h-6 text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.5)]" />
-                 )}
-               </div>
-               <div>
-                 <h1 className="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-white/90 to-white/60 tracking-tight drop-shadow-sm">
-                   {automationMode === 'ai' ? 'Agentes I.A. (RAG)' : 'Fluxos de Bot (Estilo Typebot)'}
-                 </h1>
-                 <p className="text-[#a1a1aa] text-xs font-semibold mt-0.5">
-                   {automationMode === 'ai' 
-                     ? 'Orquestre o cérebro autônomo da sua empresa no WhatsApp com inteligência Gemini e base RAG.' 
-                     : 'Automação visual determinística sem consumo de I.A. Conecte blocos e chame subfluxos modulares.'}
-                 </p>
-               </div>
-            </div>
-            
-            {/* Seletor de Abas Premium (Apenas exibido no modo IA) */}
             {automationMode === 'ai' && (
-              <div className="flex bg-white/[0.02] border border-white/10 p-1 rounded-2xl backdrop-blur-md">
+              <div className="flex bg-black/40 border border-white/10 p-1 rounded-xl">
                 <button
                   onClick={() => { setActiveTab('bots'); setShowTemplateGallery(false); }}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                    activeTab === 'bots' 
-                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30" 
-                      : "text-white/40 hover:text-white/80"
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                    activeTab === 'bots' ? "bg-indigo-600 text-white" : "text-white/45 hover:text-white/80"
                   )}
                 >
                   <Bot className="w-3.5 h-3.5" />
-                  Meus Robôs
+                  Robôs
                 </button>
                 <button
                   onClick={() => { setActiveTab('comercio'); setShowTemplateGallery(false); }}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                    activeTab === 'comercio' 
-                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30" 
-                      : "text-white/40 hover:text-white/80"
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                    activeTab === 'comercio' ? "bg-emerald-600 text-white" : "text-white/45 hover:text-white/80"
                   )}
                 >
                   <Store className="w-3.5 h-3.5" />
-                  Dados da Empresa
+                  Empresa
                 </button>
                 <button
                   onClick={() => { setActiveTab('simulador'); setShowTemplateGallery(false); }}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                    activeTab === 'simulador' 
-                      ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" 
-                      : "text-white/40 hover:text-white/80"
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                    activeTab === 'simulador' ? "bg-purple-600 text-white" : "text-white/45 hover:text-white/80"
                   )}
                 >
                   <Network className="w-3.5 h-3.5" />
@@ -1726,8 +1686,8 @@ Instruções importantes:
 
       {/* Main Content Area (Scroll Nativo Fluido em Ambos os Modos) */}
       {automationMode === 'typebot' ? (
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-8 py-6 styled-scrollbar bg-[#0f1013] relative">
-          <div className="max-w-[1200px] mx-auto relative z-10 pb-20">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4 styled-scrollbar bg-[#0f1013] relative">
+          <div className="max-w-[1280px] mx-auto relative z-10 pb-16">
             <TypebotFlowsManager onFlowsChange={fetchBots} />
           </div>
         </div>
@@ -1944,12 +1904,12 @@ Instruções importantes:
                                   )}
 
                                   <div className="flex justify-between items-start gap-3 mb-4">
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center group-hover:border-indigo-500/20 group-hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] transition-all">
-                                        <Bot className="w-6 h-6 text-indigo-400 group-hover:scale-105 transition-transform" />
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="w-11 h-11 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center shrink-0 group-hover:border-indigo-500/20 group-hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] transition-all">
+                                        <Bot className="w-5 h-5 text-indigo-400 group-hover:scale-105 transition-transform" />
                                       </div>
-                                      <div>
-                                        <h5 className="font-bold text-sm text-white/90 group-hover:text-white transition-colors line-clamp-1">{bot.name}</h5>
+                                      <div className="min-w-0">
+                                        <h5 className="font-bold text-sm text-white/90 group-hover:text-white transition-colors truncate">{bot.name}</h5>
                                         <div className="flex items-center gap-1.5 mt-1">
                                           {bot.status === 'active' ? (
                                             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -1960,6 +1920,38 @@ Instruções importantes:
                                         </div>
                                       </div>
                                     </div>
+
+                                    {/* Switch ON/OFF do Robô de I.A. */}
+                                    <button
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={bot.status === 'active'}
+                                      onClick={(e) => handleToggleAiBotStatus(bot, e)}
+                                      title={bot.status === 'active' ? 'Ativo: Clique para desativar este robô' : 'Inativo: Clique para ativar este robô'}
+                                      className={cn(
+                                        "inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-full border transition-all cursor-pointer shrink-0 active:scale-95",
+                                        bot.status === 'active'
+                                          ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
+                                          : "bg-black/40 border-white/10 text-white/45 hover:border-white/25"
+                                      )}
+                                    >
+                                      <span className="text-[9px] font-black uppercase">
+                                        {bot.status === 'active' ? 'ON' : 'OFF'}
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "relative inline-flex h-4 w-7 shrink-0 rounded-full p-0.5 transition-colors duration-200",
+                                          bot.status === 'active' ? "bg-emerald-500" : "bg-zinc-700"
+                                        )}
+                                      >
+                                        <span
+                                          className={cn(
+                                            "inline-block h-3 w-3 rounded-full bg-white shadow transform transition duration-200",
+                                            bot.status === 'active' ? "translate-x-3" : "translate-x-0"
+                                          )}
+                                        />
+                                      </span>
+                                    </button>
                                   </div>
 
                                   <p className="text-white/40 text-xs leading-relaxed font-medium mb-5 line-clamp-2 min-h-[32px]">

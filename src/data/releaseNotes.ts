@@ -712,6 +712,55 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.9',
+    date: '2026-11-27',
+    summary: 'Switch ON/OFF Instantâneo nos Bots e no Flow Builder com Garantia de Parada/Ativação, Workspace SaaS Limpo com Máxima Área de Canvas e Exclusão em Cascata de Fluxos',
+    notes: [
+      {
+        id: 'feat-bot-toggle-switch-and-clean-builder-workspace-849',
+        category: 'features',
+        title: 'Switch Interativo ON/OFF nos Cards de Bots & Workspace Limpo de Última Geração no Flow Builder',
+        description: 'Novo interruptor ON/OFF direto nos cards de Fluxos Typebot, nos cards de Robôs com I.A. e na barra superior do Flow Builder. Ao desligar (OFF), o sistema desvincula a versão ativa e encerra todas as sessões em andamento (conversation_states) daquele fluxo para garantir que o bot pare de responder imediatamente; ao ligar (ON), publica a versão mais recente e garante a ativação na instância WhatsApp. Além disso, o Radar Ao Vivo passa a iniciar recolhido em uma barra slim de 1 linha, a biblioteca lateral de blocos do Builder agora é retrátil com filtro por categorias e o cabeçalho foi unificado em 1 linha para liberar máxima área útil de tela.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'typebot-flow',
+          moduleLabel: 'Robôs & Construtor Visual (Flow Builder) • Switch ON/OFF & Workspace Clean',
+          purpose: 'Permitir ativar ou desativar qualquer robô/fluxo com 1 clique através de um Switch claro (garantindo silêncio imediato quando OFF e resposta imediata quando ON) e oferecer uma área de trabalho ampla, limpa e sem poluição visual para criar e editar fluxos.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Robôs (/settings/bots) ➔ Aba "Fluxos de Bot" ou "Robôs com I.A."',
+            '2. No canto superior direito de cada card de Bot, clique no Switch "ON / OFF" para ligar ou desligar o robô instantaneamente',
+            '3. Clique em "Editar no Builder" (/flows/:id/edit) para usar o novo workspace com barra única de 1 linha, Switch ON/OFF no topo, biblioteca lateral retrátil e Radar sob demanda'
+          ],
+          howToTest: [
+            '1. Acesse /settings/bots e veja todos os seus cards de bots visíveis logo no topo da tela, sem painéis gigantes ocupando espaço.',
+            '2. Clique no Switch "ON / OFF" de um fluxo para desligá-lo (OFF) ou ativá-lo (ON) e confira a confirmação imediata de status.',
+            '3. Abra qualquer fluxo em "Editar no Builder" (/flows/:id/edit), filtre os blocos pelas abas (Todos | Msgs | Inputs | Lógica | Eventos) ou recolha a barra lateral para editar o canvas em tela cheia.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Fluxos de Bot (/settings/bots) & Flow Builder (/flows/:id/edit)',
+            contextElements: ['🟢 Respondendo no WhatsApp', '🔘 Switch ON / OFF', '📡 Radar & Testes (Slim)', '📐 Canvas Ampliado'],
+            targetButtonLabel: '👆 Clique Aqui: Switch ON / OFF (Ativar ou Desativar Bot)',
+            targetButtonPosition: 'Canto superior direito de cada Card de Bot e barra superior esquerda do Flow Builder',
+            visualPreviewVariant: 'typebot-poll'
+          },
+          quickAction: {
+            label: 'Abrir Central de Bots',
+            route: '/settings/bots?tab=typebot'
+          }
+        }
+      },
+      {
+        id: 'fix-delete-flow-cascade-conversation-states-849',
+        category: 'fixes',
+        title: 'Correção de Exclusão de Fluxos com Limpeza em Cascata de Sessões (conversation_states)',
+        description: 'Corrigida a violação de chave estrangeira (conversation_states_flow_version_id_fkey) ao excluir um fluxo que já possuía histórico de sessões, adicionando ON DELETE CASCADE e política RLS no banco além de fallback de desvínculo no frontend.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.8',
     date: '2026-11-27',
     summary: 'Conferência de Caixa: Normalização Silenciosa Multi-Dias, Leitura C6 Pay Resumido, Rotina Bancária Salva com Alertas Operacionais e Correção de Ocultar Detalhes',

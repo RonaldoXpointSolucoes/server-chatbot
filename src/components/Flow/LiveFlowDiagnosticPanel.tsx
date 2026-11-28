@@ -105,7 +105,7 @@ export function LiveFlowDiagnosticPanel({
   onTelemetryMapChange,
   compactMode = false
 }: LiveFlowDiagnosticPanelProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'radar' | 'foodnext_tester' | 'blocked_convs'>('radar');
   const [loading, setLoading] = useState(false);
 
@@ -1050,139 +1050,111 @@ export function LiveFlowDiagnosticPanel({
   const activeWaitingStates = activeStates.filter(s => s.status === 'BOT_ACTIVE');
 
   return (
-    <div className="w-full rounded-3xl bg-gradient-to-br from-[#12161b]/95 via-[#13151a]/95 to-[#0f1115]/95 border border-emerald-500/30 shadow-[0_12px_45px_rgba(0,0,0,0.65)] backdrop-blur-2xl overflow-hidden transition-all">
+    <div className="w-full rounded-2xl bg-[#12151a]/95 border border-white/10 shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-2xl overflow-hidden transition-all">
       {/* ===================================================================== */}
-      {/* 1. BARRA MESTRA: STATUS NÍTIDO DO BOOT ON-LINE & CAIXA WHATSAPP        */}
+      {/* 1. BARRA SLIM DE STATUS: BOOT ON-LINE, CAIXA WHATSAPP & CONTADORES    */}
       {/* ===================================================================== */}
-      <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-950/50 via-teal-950/30 to-indigo-950/40 border-b border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-          <div className="relative w-12 h-12 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400/50 flex items-center justify-center text-emerald-300 shrink-0 shadow-[0_0_25px_rgba(16,185,129,0.35)]">
-            <Radio className="w-6 h-6 animate-pulse" />
-            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+      <div className="px-4 py-2.5 bg-gradient-to-r from-emerald-950/40 via-[#141820] to-indigo-950/30 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-wrap">
+          <div className="relative w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0">
+            <Radio className="w-4 h-4 animate-pulse" />
+            <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-[#12161b]" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-[#12161b]" />
             </span>
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.6)]">
-                🟢 BOOT ON-LINE & ATIVO
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            {activeFlowsOrdered.length === 0 ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                ⚪ Nenhum Boot Ativo
               </span>
-              {companyInstances.map(inst => (
-                <span
-                  key={inst.id}
-                  className={cn(
-                    "px-2.5 py-0.5 rounded-full text-[11px] font-bold border flex items-center gap-1.5",
-                    inst.status === 'connected'
-                      ? "bg-emerald-500/15 text-emerald-200 border-emerald-500/40"
-                      : "bg-rose-500/15 text-rose-300 border-rose-500/40"
-                  )}
-                >
-                  <Smartphone className="w-3 h-3" />
-                  <span>Caixa: <strong>{inst.display_name}</strong> ({formatPhoneBr(inst.phone_number)})</span>
-                  <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-black/40">
-                    {inst.status === 'connected' ? 'CONECTADA' : inst.status}
-                  </span>
-                </span>
-              ))}
-            </div>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.45)]">
+                🟢 {activeFlowsOrdered.length === 1 ? ` Respondendo: "${activeFlowsOrdered[0].name}"` : `${activeFlowsOrdered.length} Boots Ativos`}
+              </span>
+            )}
 
-            <h3 className="text-sm sm:text-base font-black text-white mt-1.5 tracking-tight flex flex-wrap items-center gap-2">
-              {activeFlowsOrdered.length === 0 ? (
-                <span className="text-amber-300">⚠️ Nenhum Fluxo Publicado no Ar em {tenantName}</span>
-              ) : activeFlowsOrdered.length === 1 ? (
-                <>
-                  <span>Respondendo no WhatsApp:</span>
-                  <span className="text-emerald-300 underline decoration-emerald-500/50 underline-offset-4">
-                    Fluxo "{activeFlowsOrdered[0].name}"
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>{activeFlowsOrdered.length} Boots/Fluxos Ativos em Paralelo:</span>
-                  {activeFlowsOrdered.map((af, idx) => (
-                    <span
-                      key={af.id}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-xl text-xs font-extrabold border",
-                        idx === 0
-                          ? "bg-emerald-500/25 text-emerald-200 border-emerald-400/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
-                          : "bg-indigo-500/20 text-indigo-200 border-indigo-400/40"
-                      )}
-                    >
-                      <span>{idx + 1}º {af.name}</span>
-                      <span className="text-[10px] font-mono opacity-80">
-                        [{af.parsedRules.map((r: any) => r.type === 'ALL' ? 'ALL: Qualquer Msg' : `${r.type}: "${r.value}"`).join(', ')}]
-                      </span>
-                    </span>
-                  ))}
-                </>
-              )}
-            </h3>
+            {companyInstances.slice(0, 2).map(inst => (
+              <span
+                key={inst.id}
+                className={cn(
+                  "px-2.5 py-0.5 rounded-full text-[11px] font-medium border flex items-center gap-1.5",
+                  inst.status === 'connected'
+                    ? "bg-white/[0.04] text-emerald-200 border-emerald-500/30"
+                    : "bg-rose-500/15 text-rose-300 border-rose-500/40"
+                )}
+              >
+                <Smartphone className="w-3 h-3 text-emerald-400" />
+                <span>{inst.display_name} ({formatPhoneBr(inst.phone_number)})</span>
+              </span>
+            ))}
           </div>
         </div>
 
         {/* Contadores Rápidos & Ações */}
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span className="text-white/60">Entraram:</span>
             <strong className="text-emerald-300 font-mono">{enteredInboundCount}</strong>
           </div>
 
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-            <span className="text-white/60">Parados no Fluxo:</span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            <span className="text-white/60">No Fluxo:</span>
             <strong className="text-amber-300 font-mono">{activeWaitingStates.length}</strong>
           </div>
 
-          {(blockedInboundCount > 0 || pausedConvsCount > 0) && (
+          {pausedConvsCount > 0 && (
             <button
               type="button"
-              onClick={() => {
-                setIsOpen(true);
-                setActiveSubTab('blocked_convs');
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-xs text-rose-200 font-bold cursor-pointer transition-all animate-pulse"
+              disabled={unblockingAll}
+              onClick={handleUnblockAllPausedConversations}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-[11px] text-rose-200 font-bold cursor-pointer transition-all"
+              title="Desbloquear conversas pausadas por atendimento humano"
             >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
-              <span>{pausedConvsCount} Conversa(s) Pausada(s)</span>
+              <Unlock className="w-3 h-3 text-rose-300" />
+              <span>{unblockingAll ? 'Liberando...' : `Desbloquear (${pausedConvsCount})`}</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={() => fetchDiagnosticData()}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white cursor-pointer transition-all"
-            title="Atualizar Radar Agora"
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white cursor-pointer transition-all"
+            title="Atualizar Diagnóstico Agora"
           >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin text-emerald-400")} />
+            <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin text-emerald-400")} />
           </button>
 
           <button
             type="button"
             onClick={() => setIsOpen(o => !o)}
-            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white flex items-center gap-1.5 cursor-pointer"
+            className={cn(
+              "px-3 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all",
+              isOpen
+                ? "bg-emerald-500/20 text-emerald-200 border-emerald-400/40"
+                : "bg-white/10 hover:bg-white/15 text-white border-white/15"
+            )}
           >
-            {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            <span>{isOpen ? 'Recolher Painel' : 'Abrir Radar & Testes'}</span>
+            {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            <span>{isOpen ? 'Ocultar Radar' : 'Radar & Testes'}</span>
           </button>
         </div>
       </div>
 
       {/* ===================================================================== */}
-      {/* 2. BANNER DE ALERTA SE HOUVER CONVERSAS BLOQUEADAS POR PAUSA HUMANA   */}
+      {/* 2. BANNER DE ALERTA (EXIBIDO APENAS QUANDO O PAINEL ESTÁ EXPANDIDO)   */}
       {/* ===================================================================== */}
-      {pausedConvsCount > 0 && (
-        <div className="px-4 sm:px-5 py-3 bg-gradient-to-r from-rose-950/70 via-amber-950/50 to-rose-950/60 border-b border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start sm:items-center gap-2.5 text-xs">
+      {isOpen && pausedConvsCount > 0 && (
+        <div className="px-4 py-2.5 bg-gradient-to-r from-rose-950/70 via-amber-950/50 to-rose-950/60 border-t border-b border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-2 text-xs">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
             <div className="text-rose-100">
-              <strong className="text-amber-300">Diagnóstico Técnico de Bloqueio Detectado:</strong> Existem{' '}
-              <strong className="underline">{pausedConvsCount} conversa(s)</strong> nesta empresa com{' '}
-              <code className="px-1.5 py-0.5 rounded bg-black/50 text-rose-300 font-mono text-[11px]">ai_paused = true</code> ou{' '}
-              <code className="px-1.5 py-0.5 rounded bg-black/50 text-amber-300 font-mono text-[11px]">status = "open"</code>. Quando esses clientes enviam mensagem (ex: "Oi"), ela chega no WhatsApp mas o motor bloqueia a entrada no fluxo!
+              <strong className="text-amber-300">Bloqueio por Pausa Humana:</strong> Existem{' '}
+              <strong className="underline">{pausedConvsCount} conversa(s)</strong> com{' '}
+              <code className="px-1 py-0.5 rounded bg-black/50 text-rose-300 font-mono text-[10px]">ai_paused = true</code>.
             </div>
           </div>
 
@@ -1190,10 +1162,10 @@ export function LiveFlowDiagnosticPanel({
             type="button"
             disabled={unblockingAll}
             onClick={handleUnblockAllPausedConversations}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer shrink-0 active:scale-95 transition-all disabled:opacity-50"
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0 active:scale-95 transition-all disabled:opacity-50"
           >
             <Unlock className="w-3.5 h-3.5" />
-            <span>{unblockingAll ? 'Desbloqueando...' : `Desbloquear Todas (${pausedConvsCount}) para o Fluxo`}</span>
+            <span>{unblockingAll ? 'Desbloqueando...' : `Desbloquear Todas (${pausedConvsCount})`}</span>
           </button>
         </div>
       )}

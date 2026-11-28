@@ -382,18 +382,22 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
     }
   };
 
+  const [togglingFlowId, setTogglingFlowId] = useState<string | null>(null);
+
   const handleToggleFlowActive = async (flow: any) => {
+    if (togglingFlowId === flow.id) return;
+    setTogglingFlowId(flow.id);
     try {
       const isCurrentlyActive = Boolean(flow.active_version_id);
       let newActiveVersionId: string | null = null;
 
       if (!isCurrentlyActive) {
-        // 1. Verifica se já existe outro fluxo ativo na mesma empresa para evitar conflito de gatilhos
+        // 1. Verifica se já existe outro fluxo ativo na mesma empresa com gatilho conflitante
         const otherActiveFlows = flows.filter(f => f.id !== flow.id && Boolean(f.active_version_id));
         if (otherActiveFlows.length > 0) {
           const otherNames = otherActiveFlows.map(f => `"${f.name}"`).join(', ');
           const pauseOthers = window.confirm(
-            `A empresa já possui o(s) fluxo(s) ${otherNames} ATIVO(S).\n\nDeseja pausar automaticamente o(s) outro(s) fluxo(s) para que apenas "${flow.name}" responda no WhatsApp sem conflito? (Clique em OK para substituir ou Cancelar para manter ambos ativos)`
+            `O fluxo ${otherNames} já está ATIVO.\n\nDeseja desativar automaticamente ${otherNames} para que apenas "${flow.name}" responda no WhatsApp sem conflito?\n(OK = Substituir e deixar apenas "${flow.name}" ativo | Cancelar = Manter ambos ativos)`
           );
           if (pauseOthers) {
             const otherIds = otherActiveFlows.map(f => f.id);
@@ -401,41 +405,34 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
               .from('flows')
               .update({ active_version_id: null, updated_at: new Date().toISOString() })
               .in('id', otherIds);
-          }
-        }
 
-        // 2. Validação de Governança com Robôs de IA
-        try {
-          const { data: activeBots } = await supabase
-            .from('bots')
-            .select('id, name')
-            .eq('tenant_id', tenantId)
-            .eq('status', 'active');
-
-          if (activeBots && activeBots.length > 0) {
-            const hasAllTrigger = Array.isArray(flow.trigger_rules) && flow.trigger_rules.some((r: any) => r.type === 'ALL');
-            const alertMsg = hasAllTrigger
-              ? `Atenção: A empresa ${tenantInfo?.name || ''} possui ${activeBots.length} Robô(s) com I.A. ativo(s).\n\nComo este fluxo possui gatilho "Qualquer Mensagem", ele assumirá 100% dos atendimentos e a I.A. não responderá.\n\nDeseja realmente ativar este fluxo em produção?`
-              : `Atenção: A empresa ${tenantInfo?.name || ''} possui ${activeBots.length} Robô(s) com I.A. ativo(s).\n\nDeseja ativar este fluxo para responder prioritariamente aos gatilhos configurados?`;
-
-            if (!window.confirm(alertMsg)) {
-              return;
+            const { data: otherVers } = await supabase
+              .from('flow_versions')
+              .select('id')
+              .in('flow_id', otherIds);
+            const otherVerIds = (otherVers || []).map(v => v.id);
+            if (otherVerIds.length > 0) {
+              await supabase.from('conversation_states').delete().in('flow_version_id', otherVerIds);
             }
           }
-        } catch (botErr) {
-          console.warn('[TypebotFlowsManager] Falha ao verificar bots:', botErr);
         }
 
-        // 3. Busca a versão mais recente (ou cria uma versão inicial se não houver)
+        // 2. Busca a versão mais recente (ou cria uma versão inicial se não houver) e garante status PUBLISHED
         const { data: versions } = await supabase
           .from('flow_versions')
-          .select('id')
+          .select('id, status')
           .eq('flow_id', flow.id)
           .order('created_at', { ascending: false })
           .limit(1);
 
         if (versions && versions.length > 0) {
           newActiveVersionId = versions[0].id;
+          if (versions[0].status !== 'PUBLISHED') {
+            await supabase
+              .from('flow_versions')
+              .update({ status: 'PUBLISHED' })
+              .eq('id', newActiveVersionId);
+          }
         } else {
           const { data: createdVer } = await supabase
             .from('flow_versions')
@@ -449,6 +446,43 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
             .single();
           if (createdVer) newActiveVersionId = createdVer.id;
         }
+
+        // 3. Garante que as instâncias WhatsApp conectadas desta empresa estejam com bot_active = true
+        const { data: instList } = await supabase
+          .from('whatsapp_instances')
+          .select('id, settings')
+          .eq('tenant_id', tenantId);
+        if (instList && instList.length > 0) {
+          await Promise.all(
+            instList.map(inst => {
+              const curSettings = inst.settings || {};
+              if (curSettings.bot_active === false || curSettings.is_api_only === true) {
+                return supabase
+                  .from('whatsapp_instances')
+                  .update({
+                    settings: { ...curSettings, bot_active: true, is_api_only: false, chat_enabled: true }
+                  })
+                  .eq('id', inst.id);
+              }
+              return Promise.resolve();
+            })
+          );
+        }
+      } else {
+        // DESATIVANDO O BOOT (Switch OFF):
+        // Encerra todas as sessões ativas (conversation_states) vinculadas às versões deste fluxo
+        // para garantir que nenhum cliente em andamento continue recebendo respostas deste bot.
+        const { data: flowVers } = await supabase
+          .from('flow_versions')
+          .select('id')
+          .eq('flow_id', flow.id);
+        const verIds = (flowVers || []).map(v => v.id);
+        if (verIds.length > 0) {
+          await supabase
+            .from('conversation_states')
+            .delete()
+            .in('flow_version_id', verIds);
+        }
       }
 
       const { error: updErr } = await supabase
@@ -461,11 +495,23 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
 
       if (updErr) throw updErr;
 
+      setFlows(prev => prev.map(f => f.id === flow.id ? { ...f, active_version_id: newActiveVersionId } : f));
       await fetchFlows();
       onFlowsChange?.();
+
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: {
+          message: newActiveVersionId
+            ? `🟢 Boot "${flow.name}" ATIVADO e pronto para responder no WhatsApp!`
+            : `⚪ Boot "${flow.name}" DESATIVADO. Ele não responderá a nenhuma mensagem.`,
+          type: newActiveVersionId ? 'success' : 'info'
+        }
+      }));
     } catch (err: any) {
       console.error('[TypebotFlowsManager] Erro ao alternar status do fluxo:', err);
       alert('Erro ao alterar status do fluxo: ' + (err.message || String(err)));
+    } finally {
+      setTogglingFlowId(null);
     }
   };
 
@@ -475,8 +521,16 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
     }
 
     try {
-      await supabase.from('flows').update({ active_version_id: null }).eq('id', flowId);
+      // 1. Desvincula active_version_id do fluxo antes de remover versões
+      const { error: unlinkErr } = await supabase
+        .from('flows')
+        .update({ active_version_id: null })
+        .eq('id', flowId);
+      if (unlinkErr) {
+        console.warn('[TypebotFlowsManager] Aviso ao desvincular active_version_id:', unlinkErr.message);
+      }
 
+      // 2. Busca todas as versões do fluxo para limpar estados de conversa vinculados
       const { data: versions } = await supabase
         .from('flow_versions')
         .select('id')
@@ -484,17 +538,28 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
       const versionIds = (versions || []).map(v => v.id);
 
       if (versionIds.length > 0) {
-        await supabase
+        // Limpa ou desvincula conversation_states que apontam para qualquer versão deste fluxo
+        const { error: stateDelErr } = await supabase
           .from('conversation_states')
           .delete()
           .in('flow_version_id', versionIds);
+        if (stateDelErr) {
+          await supabase
+            .from('conversation_states')
+            .update({ flow_version_id: null, current_state: 'START' })
+            .in('flow_version_id', versionIds);
+        }
 
-        await supabase
+        const { error: verDelErr } = await supabase
           .from('flow_versions')
           .delete()
           .eq('flow_id', flowId);
+        if (verDelErr) {
+          console.warn('[TypebotFlowsManager] Aviso ao remover flow_versions:', verDelErr.message);
+        }
       }
 
+      // 3. Remove o fluxo (ON DELETE CASCADE no banco garante limpeza residual de versões e estados)
       const { error: delError } = await supabase.from('flows').delete().eq('id', flowId);
       if (delError) {
         throw new Error(delError.message);
@@ -718,8 +783,8 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
     .map(f => f.id);
 
   return (
-    <div className="flex flex-col gap-6 animate-in fade-in duration-300">
-      {/* PAINEL DE COMANDO AO VIVO: BOOT ONLINE, RADAR DE MENSAGENS, DIAGNÓSTICO E TESTADOR FOODNEXT */}
+    <div className="flex flex-col gap-4 animate-in fade-in duration-300">
+      {/* 1. BARRA SLIM DE COMANDO AO VIVO (RECOLHIDA POR PADRÃO PARA MÁXIMA ÁREA ÚTIL) */}
       <LiveFlowDiagnosticPanel
         tenantId={tenantId}
         tenantName={tenantInfo?.name || 'Empresa Atual'}
@@ -730,74 +795,30 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
         }}
       />
 
-      {/* Top Banner de Destaque / Estatísticas da Empresa Selecionada */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 backdrop-blur-md flex items-center justify-between">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-              Fluxos de {tenantInfo?.name || 'Empresa Atual'}
-            </span>
-            <span className="text-2xl font-black text-white">{flows.length}</span>
-            <span className="text-[11px] text-white/50">Isolados exclusivamente nesta empresa</span>
+      {/* 2. TOOLBAR UNIFICADA: BUSCA + FILTROS COM CONTADORES + AÇÕES RÁPIDAS */}
+      <div className="p-3 rounded-2xl bg-[#14161b]/90 border border-white/10 backdrop-blur-xl flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-lg">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1">
+          {/* Barra de Pesquisa Compacta */}
+          <div className="relative flex-1 max-w-md group">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+              <Search className="w-4 h-4 text-white/35 group-focus-within:text-emerald-400 transition-all" />
+            </div>
+            <input
+              type="text"
+              placeholder="Buscar robô/fluxo por nome ou gatilho..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-3.5 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-white/35 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/40 transition-all"
+            />
           </div>
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
-            <Waypoints size={24} />
-          </div>
-        </div>
 
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-500/15 via-emerald-500/10 to-transparent border-2 border-emerald-400/40 backdrop-blur-md flex items-center justify-between shadow-[0_0_25px_rgba(16,185,129,0.15)]">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-black text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              Boots Online (No Ar)
-            </span>
-            <span className="text-2xl font-black text-white">{activeCount}</span>
-            <span className="text-[11px] text-emerald-200/80 font-semibold">
-              {activeCount > 0 ? 'Ativos e respondendo no WhatsApp agora' : 'Nenhum fluxo ativo no momento'}
-            </span>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/25 border border-emerald-400/50 flex items-center justify-center text-emerald-300 shadow-inner">
-            <Zap size={24} />
-          </div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-indigo-500/5 to-transparent border border-indigo-500/20 backdrop-blur-md flex items-center justify-between">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Consumo de IA</span>
-            <span className="text-2xl font-black text-white">0 Tokens</span>
-            <span className="text-[11px] text-emerald-400 font-semibold">100% Determinístico & Gratuito</span>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
-            <Bot size={24} />
-          </div>
-        </div>
-      </div>
-
-      {/* Action Bar */}
-      <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4">
-        {/* Barra de Pesquisa */}
-        <div className="relative w-full xl:w-[380px] group">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="w-4 h-4 text-white/30 group-focus-within:text-emerald-400 transition-all" />
-          </div>
-          <input
-            type="text"
-            placeholder="Buscar por nome do fluxo ou palavra-chave..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-2xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all shadow-inner"
-          />
-        </div>
-
-        {/* Filtros e Botões de Ação */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-end">
-          {/* Filtro Status */}
-          <div className="flex bg-white/[0.03] border border-white/10 p-1 rounded-xl backdrop-blur-md">
+          {/* Filtro Segmentado de Status */}
+          <div className="flex bg-black/40 border border-white/10 p-1 rounded-xl shrink-0">
             <button
               onClick={() => setStatusFilter('all')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                statusFilter === 'all' ? "bg-white/15 text-white" : "text-white/40 hover:text-white/80"
+                "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                statusFilter === 'all' ? "bg-white/15 text-white shadow-sm" : "text-white/45 hover:text-white/80"
               )}
             >
               Todos ({flows.length})
@@ -805,62 +826,65 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
             <button
               onClick={() => setStatusFilter('active')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                statusFilter === 'active' ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "text-white/40 hover:text-white/80"
+                "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                statusFilter === 'active'
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  : "text-white/45 hover:text-white/80"
               )}
             >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               Ativos ({activeCount})
             </button>
             <button
               onClick={() => setStatusFilter('draft')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                statusFilter === 'draft' ? "bg-white/15 text-white" : "text-white/40 hover:text-white/80"
+                "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                statusFilter === 'draft' ? "bg-white/15 text-white shadow-sm" : "text-white/45 hover:text-white/80"
               )}
             >
-              Pausados ({flows.length - activeCount})
+              Desativados ({flows.length - activeCount})
             </button>
           </div>
+        </div>
 
-          {/* Biblioteca de Modelos Prontos */}
+        {/* Botões de Ação Primários e Secundários */}
+        <div className="flex flex-wrap items-center gap-2 justify-end shrink-0">
           <button
             onClick={() => setIsTemplatesModalOpen(true)}
-            className="px-4 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 text-xs font-bold rounded-2xl transition-all border border-indigo-500/20 hover:border-indigo-500/40 flex items-center gap-2 cursor-pointer shadow-sm backdrop-blur-md active:scale-95"
+            className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 text-xs font-bold rounded-xl transition-all border border-indigo-500/25 hover:border-indigo-500/40 flex items-center gap-1.5 cursor-pointer active:scale-95"
           >
-            <BookOpen size={14} className="text-indigo-400" />
+            <BookOpen size={13} className="text-indigo-400" />
             <span>Modelos Prontos</span>
           </button>
 
-          {/* Importar Typebot */}
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="px-4 py-3 bg-white/[0.04] hover:bg-white/[0.08] text-white text-xs font-bold rounded-2xl transition-all border border-white/10 hover:border-white/20 flex items-center gap-2 cursor-pointer shadow-sm backdrop-blur-md active:scale-95"
+            className="px-3 py-2 bg-white/[0.04] hover:bg-white/[0.08] text-white/85 text-xs font-bold rounded-xl transition-all border border-white/10 hover:border-white/20 flex items-center gap-1.5 cursor-pointer active:scale-95"
           >
-            <Upload size={14} className="text-teal-400" />
-            <span>Importar Typebot (.json)</span>
+            <Upload size={13} className="text-teal-400" />
+            <span>Importar .JSON</span>
           </button>
 
-          {/* Criar Novo Fluxo */}
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="px-5 py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-2xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer active:scale-95"
+            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer active:scale-95"
           >
-            <Plus size={16} />
-            <span>Criar Novo Fluxo</span>
+            <Plus size={15} />
+            <span>Novo Fluxo</span>
           </button>
         </div>
       </div>
 
-      {/* Grid de Fluxos */}
+      {/* 3. GRID DE CARDS DE BOTS COM SWITCH INTERATIVO ON/OFF */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3 text-white/40">
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-white/40">
           <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
           <span className="text-xs font-semibold">Carregando fluxos de {tenantInfo?.name || 'sua empresa'}...</span>
         </div>
       ) : filteredFlows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-12 bg-white/[0.02] border border-white/5 rounded-3xl text-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-            <Waypoints size={32} />
+        <div className="flex flex-col items-center justify-center p-10 bg-white/[0.02] border border-white/5 rounded-3xl text-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <Waypoints size={28} />
           </div>
           <div className="flex flex-col gap-1 max-w-md">
             <h3 className="text-base font-bold text-white">Nenhum fluxo encontrado em {tenantInfo?.name || 'sua empresa'}</h3>
@@ -870,131 +894,163 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                 : 'Crie seu primeiro fluxo determinístico estilo Typebot, escolha um modelo da biblioteca oficial ou importe um arquivo .json.'}
             </p>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+          <div className="flex flex-wrap items-center justify-center gap-2.5 mt-1">
             <button
               onClick={() => setIsCreateModalOpen(true)}
-              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
             >
               <Plus size={14} />
               <span>Criar Primeiro Fluxo</span>
             </button>
             <button
               onClick={() => setIsTemplatesModalOpen(true)}
-              className="px-4 py-2.5 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 text-xs font-bold rounded-xl transition-all border border-indigo-500/30 flex items-center gap-2 cursor-pointer"
+              className="px-3.5 py-2 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 text-xs font-bold rounded-xl transition-all border border-indigo-500/30 flex items-center gap-1.5 cursor-pointer"
             >
               <BookOpen size={14} />
               <span>Usar Modelo Pronto</span>
             </button>
-            <button
-              onClick={() => setIsImportModalOpen(true)}
-              className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white/80 text-xs font-bold rounded-xl transition-all border border-white/10 flex items-center gap-2 cursor-pointer"
-            >
-              <Upload size={14} />
-              <span>Importar do Typebot</span>
-            </button>
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {filteredFlows.map(flow => {
             const isActive = Boolean(flow.active_version_id);
+            const isToggling = togglingFlowId === flow.id;
             const rules: TriggerRule[] = typeof flow.trigger_rules === 'string' 
               ? JSON.parse(flow.trigger_rules || '[]') 
               : (flow.trigger_rules || []);
+            const visibleRules = rules.filter((r: any) => r && r.type !== '__META__' && (r as any).keyword !== '__META__');
 
             const versionObj = flow.flow_versions || flow.latest_version;
             const nodesCount = versionObj?.nodes?.length || 0;
             const edgesCount = versionObj?.edges?.length || 0;
             const priorityRank = isActive ? activePriorityOrderIds.indexOf(flow.id) + 1 : 0;
-            const hasSpecificRule = rules.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+            const hasSpecificRule = visibleRules.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
 
             return (
               <div 
                 key={flow.id}
                 className={cn(
-                  "flex flex-col justify-between p-6 rounded-3xl transition-all duration-300 relative group backdrop-blur-xl overflow-hidden",
+                  "flex flex-col justify-between p-5 rounded-3xl transition-all duration-300 relative group backdrop-blur-xl overflow-hidden",
                   isActive
-                    ? "bg-gradient-to-br from-[#121e1a]/95 via-[#13191d]/95 to-[#101418]/95 border-2 border-emerald-400/70 ring-4 ring-emerald-500/15 shadow-[0_0_35px_rgba(16,185,129,0.2)] hover:shadow-[0_0_45px_rgba(16,185,129,0.3)] hover:-translate-y-0.5"
-                    : "bg-[#141518]/65 border border-white/10 hover:border-white/20 shadow-md shadow-black/40 opacity-85 hover:opacity-100"
+                    ? "bg-gradient-to-br from-[#11221c]/95 via-[#12191e]/95 to-[#0f1317]/95 border-2 border-emerald-400/70 ring-2 ring-emerald-500/10 shadow-[0_10px_35px_rgba(16,185,129,0.18)] hover:shadow-[0_14px_45px_rgba(16,185,129,0.28)]"
+                    : "bg-[#14161b]/80 border border-white/10 hover:border-white/20 shadow-lg shadow-black/40"
                 )}
               >
                 <div>
-                  {/* Faixa Superior de Destaque Nítido do Boot Online */}
-                  {isActive ? (
-                    <div className="mb-4 -mx-6 -mt-6 px-5 py-2.5 bg-gradient-to-r from-emerald-500/30 via-teal-500/25 to-emerald-600/20 border-b border-emerald-400/40 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="relative flex h-2.5 w-2.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-90" />
-                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
-                        </span>
-                        <span className="text-[11px] font-black uppercase tracking-wider text-emerald-200">
-                          🟢 BOOT ON-LINE & ATIVO NO WHATSAPP
-                        </span>
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-400 text-slate-950 shadow-sm">
-                        {priorityRank}º Prioridade {hasSpecificRule ? '(Gatilho Exato)' : '(Geral)'}
-                      </span>
+                  {/* Faixa Superior Compacta de Status + Switch Direto ON/OFF */}
+                  <div className={cn(
+                    "mb-4 -mx-5 -mt-5 px-4 py-2.5 border-b flex items-center justify-between gap-2 transition-colors",
+                    isActive
+                      ? "bg-gradient-to-r from-emerald-500/25 via-teal-500/20 to-emerald-600/15 border-emerald-400/35"
+                      : "bg-white/[0.02] border-white/5"
+                  )}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isActive ? (
+                        <>
+                          <span className="relative flex h-2.5 w-2.5 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-90" />
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-200 truncate">
+                            Respondendo no WhatsApp
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-400 text-slate-950 shrink-0">
+                            {priorityRank}º {hasSpecificRule ? 'Gatilho' : 'Geral'}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-zinc-600 shrink-0" />
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 truncate">
+                            Desativado (Não responde)
+                          </span>
+                        </>
+                      )}
                     </div>
-                  ) : (
-                    <div className="mb-4 -mx-6 -mt-6 px-5 py-2 bg-white/[0.02] border-b border-white/5 flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-zinc-600" />
-                        ⚪ Boot Offline / Pausado
-                      </span>
-                      <span className="text-[9px] text-white/30 font-mono">Rascunho Seguro</span>
-                    </div>
-                  )}
 
-                  {/* Header do Card */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
+                    {/* SWITCH INTERATIVO DE ATIVAÇÃO / DESATIVAÇÃO DO BOT */}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={isActive}
+                      disabled={isToggling}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleFlowActive(flow);
+                      }}
+                      title={
+                        isActive
+                          ? "Switch Ligado (ON): Clique para desativar este bot e parar respostas imediatamente"
+                          : "Switch Desligado (OFF): Clique para ativar este bot no WhatsApp"
+                      }
+                      className={cn(
+                        "group/switch inline-flex items-center gap-2 pl-2.5 pr-1.5 py-1 rounded-full border transition-all cursor-pointer select-none shrink-0 active:scale-95 disabled:opacity-60",
+                        isActive
+                          ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-200 shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                          : "bg-black/40 border-white/15 text-white/50 hover:border-white/30 hover:text-white/80"
+                      )}
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider">
+                        {isToggling ? '...' : isActive ? 'ON' : 'OFF'}
+                      </span>
+                      <span
+                        className={cn(
+                          "relative inline-flex h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors duration-200 ease-in-out",
+                          isActive ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]" : "bg-zinc-700"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-md transform ring-0 transition duration-200 ease-in-out",
+                            isActive ? "translate-x-4" : "translate-x-0"
+                          )}
+                        />
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Header do Card: Ícone + Nome + Metadados */}
+                  <div className="flex items-center justify-between gap-3 mb-3.5">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={cn(
-                        "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-all",
+                        "w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 transition-all",
                         isActive
-                          ? "bg-emerald-500/25 text-emerald-300 border-2 border-emerald-400/50 shadow-[0_0_20px_rgba(16,185,129,0.25)]"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 shadow-[0_0_18px_rgba(16,185,129,0.2)]"
                           : "bg-white/5 text-white/40 border border-white/10"
                       )}>
-                        <Waypoints size={22} />
+                        <Waypoints size={20} />
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <h4 className={cn(
-                          "text-base font-black transition-colors truncate",
-                          isActive ? "text-white group-hover:text-emerald-300" : "text-white/80"
-                        )} title={flow.name}>
+                        <h4
+                          onClick={() => navigate(`/flows/${flow.id}/edit`)}
+                          className={cn(
+                            "text-base font-black transition-colors truncate cursor-pointer hover:underline",
+                            isActive ? "text-white group-hover:text-emerald-300" : "text-white/80"
+                          )}
+                          title={flow.name}
+                        >
                           {flow.name}
                         </h4>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-indigo-300/80 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.2 rounded font-semibold truncate max-w-[140px]">
-                            {tenantInfo?.name || 'Empresa Atual'}
+                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-white/45">
+                          <span className="flex items-center gap-1">
+                            <Layers size={11} className="text-emerald-400/80" />
+                            {nodesCount} {nodesCount === 1 ? 'bloco' : 'blocos'}
                           </span>
-                          <span className="text-[10px] text-white/30 font-mono">
-                            #{flow.id.substring(0, 6)}
+                          <span>•</span>
+                          <span className="flex items-center gap-1">
+                            <CornerDownRight size={11} className="text-indigo-400/80" />
+                            {edgesCount} {edgesCount === 1 ? 'conexão' : 'conexões'}
                           </span>
                         </div>
                       </div>
                     </div>
-
-                    {/* Status Pill & Switch */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFlowActive(flow)}
-                      title={isActive ? "Clique para Pausar este Boot" : "Clique para Ativar este Boot Online no WhatsApp"}
-                      className={cn(
-                        "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1.5 cursor-pointer shrink-0 active:scale-95",
-                        isActive
-                          ? "bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)] hover:bg-emerald-400"
-                          : "bg-white/5 text-white/50 border-white/10 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30"
-                      )}
-                    >
-                      <span className={cn("w-2 h-2 rounded-full", isActive ? "bg-slate-950 animate-ping" : "bg-white/30")} />
-                      {isActive ? 'ON-LINE' : 'ATIVAR'}
-                    </button>
                   </div>
 
-                  {/* Gatilhos / Palavras-chave */}
-                  <div className="p-3 bg-black/30 rounded-2xl border border-white/5 mb-4 flex flex-col gap-1.5">
+                  {/* Gatilhos de Disparo Compactos */}
+                  <div className="p-2.5 bg-black/35 rounded-2xl border border-white/[0.06] mb-4 flex flex-col gap-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/40 flex items-center gap-1">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/45 flex items-center gap-1">
                         <Tag size={10} className="text-emerald-400" />
                         Gatilho de Disparo
                       </span>
@@ -1003,51 +1059,39 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                         onClick={() => handleOpenTriggersModal(flow)}
                         className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                       >
-                        Configurar
+                        Editar Gatilhos
                       </button>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5 max-h-[84px] overflow-y-auto styled-scrollbar pr-1">
-                      {rules.length === 0 ? (
+                    <div className="flex flex-wrap gap-1.5 max-h-[60px] overflow-y-auto styled-scrollbar pr-1">
+                      {visibleRules.length === 0 ? (
                         <span className="text-[11px] text-white/30 italic">Nenhum gatilho definido</span>
                       ) : (
-                        rules.map((r, i) => (
+                        visibleRules.map((r, i) => (
                           <span 
                             key={i}
-                            className="px-2 py-0.5 rounded-md bg-white/5 text-white/70 border border-white/10 text-[10px] font-mono flex items-center gap-1"
+                            className="px-2 py-0.5 rounded-lg bg-white/[0.05] text-white/80 border border-white/10 text-[10px] font-mono flex items-center gap-1"
                           >
-                            <span className="text-[9px] text-emerald-400 font-bold">{r.type}:</span>
+                            <span className="text-[9px] text-emerald-400 font-bold">
+                              {r.type === 'ALL' ? 'TODOS:' : r.type === 'EXACT' ? 'IGUAL:' : r.type === 'CONTAINS' ? 'CONTÉM:' : `${r.type}:`}
+                            </span>
                             {r.type === 'ALL' ? 'Qualquer Mensagem' : `"${r.value}"`}
                           </span>
                         ))
                       )}
                     </div>
                   </div>
-
-                  {/* Resumo de Nós */}
-                  <div className="flex items-center justify-between text-[11px] text-white/50 mb-5 font-medium">
-                    <div className="flex items-center gap-4">
-                      <span className="flex items-center gap-1">
-                        <Layers size={12} className="text-emerald-400/70" />
-                        {nodesCount} {nodesCount === 1 ? 'grupo/bloco' : 'grupos/blocos'}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <CornerDownRight size={12} className="text-indigo-400/70" />
-                        {edgesCount} {edgesCount === 1 ? 'conexão' : 'conexões'}
-                      </span>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Barra de Ações do Card */}
-                <div className="flex items-center justify-between gap-2 pt-4 border-t border-white/5">
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.06]">
+                  <div className="flex items-center gap-1">
                     {/* Botão Testar no Simulador */}
                     <button
                       type="button"
                       onClick={() => handleOpenSimulator(flow)}
-                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/5 transition-all cursor-pointer"
-                      title="Testar fluxo no Simulador Interativo"
+                      className="p-2 rounded-xl bg-white/[0.04] hover:bg-emerald-500/15 text-white/70 hover:text-emerald-300 border border-white/5 hover:border-emerald-500/30 transition-all cursor-pointer"
+                      title="Testar no Simulador"
                     >
                       <Play size={14} className="text-emerald-400" />
                     </button>
@@ -1056,8 +1100,8 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                     <button
                       type="button"
                       onClick={() => handleDuplicateFlow(flow)}
-                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/5 transition-all cursor-pointer"
-                      title="Duplicar fluxo nesta empresa"
+                      className="p-2 rounded-xl bg-white/[0.04] hover:bg-white/10 text-white/65 hover:text-white border border-white/5 transition-all cursor-pointer"
+                      title="Duplicar Fluxo"
                     >
                       <Copy size={14} />
                     </button>
@@ -1072,8 +1116,8 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                         setMoveMode('move');
                         setIsMoveModalOpen(true);
                       }}
-                      className="p-2.5 rounded-xl bg-white/5 hover:bg-indigo-500/20 text-white/60 hover:text-indigo-300 border border-white/5 hover:border-indigo-500/30 transition-all cursor-pointer"
-                      title="Mover ou copiar fluxo para outra empresa"
+                      className="p-2 rounded-xl bg-white/[0.04] hover:bg-indigo-500/20 text-white/60 hover:text-indigo-300 border border-white/5 hover:border-indigo-500/30 transition-all cursor-pointer"
+                      title="Transferir ou Copiar para outra Empresa"
                     >
                       <ArrowRightLeft size={14} />
                     </button>
@@ -1082,8 +1126,8 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                     <button
                       type="button"
                       onClick={() => handleDeleteFlow(flow.id, flow.name)}
-                      className="p-2.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 border border-white/5 hover:border-rose-500/30 transition-all cursor-pointer"
-                      title="Excluir fluxo"
+                      className="p-2 rounded-xl bg-white/[0.04] hover:bg-rose-500/20 text-white/45 hover:text-rose-400 border border-white/5 hover:border-rose-500/30 transition-all cursor-pointer"
+                      title="Excluir Fluxo"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -1093,10 +1137,15 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                   <button
                     type="button"
                     onClick={() => navigate(`/flows/${flow.id}/edit`)}
-                    className="flex-1 py-2.5 px-4 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/50 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                    className={cn(
+                      "flex-1 py-2 px-3.5 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95 border",
+                      isActive
+                        ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-emerald-300 shadow-emerald-500/20"
+                        : "bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/30"
+                    )}
                   >
                     <Edit3 size={13} />
-                    <span>Abrir no Builder</span>
+                    <span>Editar no Builder</span>
                   </button>
                 </div>
               </div>

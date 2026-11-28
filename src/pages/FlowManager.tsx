@@ -1057,7 +1057,16 @@ export default function FlowManager() {
 
       // 3. Limpar conversation_states e flow_versions
       if (versionIds.length > 0) {
-        await supabase.from('conversation_states').delete().in('flow_version_id', versionIds);
+        const { error: stateDelErr } = await supabase
+          .from('conversation_states')
+          .delete()
+          .in('flow_version_id', versionIds);
+        if (stateDelErr) {
+          await supabase
+            .from('conversation_states')
+            .update({ flow_version_id: null, current_state: 'START' })
+            .in('flow_version_id', versionIds);
+        }
         await supabase.from('flow_versions').delete().eq('flow_id', id);
       }
 

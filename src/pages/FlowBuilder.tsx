@@ -166,7 +166,10 @@ function FlowBuilderContent() {
     const [paletteSubmenu, setPaletteSubmenu] = useState<{ type: string; label: string; top: number; left: number } | null>(null);
     const [helpBlockType, setHelpBlockType] = useState<string | null>(null);
     const [isHealthOpen, setIsHealthOpen] = useState(false);
-    const [isLiveRadarOpen, setIsLiveRadarOpen] = useState(true);
+    const [isLiveRadarOpen, setIsLiveRadarOpen] = useState(false);
+    const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
+    const [activePaletteCategory, setActivePaletteCategory] = useState<string>('ALL');
+    const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
     const [telemetryByGroup, setTelemetryByGroup] = useState<Record<string, NodeLiveTelemetry>>({});
     const [telemetryByBlock, setTelemetryByBlock] = useState<Record<string, NodeLiveTelemetry>>({});
     const [builderNotice, setBuilderNotice] = useState<{ title: string; detail: string; focusGroupId?: string } | null>(null);
@@ -920,25 +923,40 @@ function FlowBuilderContent() {
     };
 
     const handleTogglePauseFlow = async () => {
-        if (!flowData) return;
+        if (!flowData || saving) return;
         const isLive = Boolean(flowData.active_version_id);
 
         try {
             if (isLive) {
-                if (!window.confirm("Deseja realmente pausar este fluxo? Ele deixará de responder no WhatsApp.")) return;
                 const { error } = await supabase
                     .from('flows')
                     .update({ active_version_id: null, updated_at: new Date().toISOString() })
                     .eq('id', flowData.id);
                 if (error) throw error;
+
+                // Encerra todas as sessões ativas (conversation_states) deste fluxo para garantir parada imediata
+                const { data: vers } = await supabase
+                    .from('flow_versions')
+                    .select('id')
+                    .eq('flow_id', flowData.id);
+                const verIds = (vers || []).map(v => v.id);
+                if (verIds.length > 0) {
+                    await supabase.from('conversation_states').delete().in('flow_version_id', verIds);
+                }
+
                 setFlowData((prev: any) => ({ ...prev, active_version_id: null }));
-                alert('Fluxo pausado com sucesso!');
+                window.dispatchEvent(new CustomEvent('toast', {
+                    detail: {
+                        message: `⚪ Boot "${flowData.name}" DESATIVADO. Ele não responderá no WhatsApp.`,
+                        type: 'info'
+                    }
+                }));
             } else {
-                await saveFlow();
+                await saveFlow(true);
             }
         } catch (err: any) {
-            console.error('Erro ao pausar fluxo:', err);
-            alert('Falha ao alternar pausa do fluxo: ' + (err.message || String(err)));
+            console.error('Erro ao alternar status do fluxo:', err);
+            alert('Falha ao alternar status do fluxo: ' + (err.message || String(err)));
         }
     };
 
@@ -1162,187 +1180,233 @@ function FlowBuilderContent() {
             }}
         >
             <div className="flex flex-col h-full bg-[#0e0e11] text-zinc-200 select-none">
-                {/* Header Estilo Typebot (responsivo sem encavalamento ou quebra de texto) */}
-                <header className="min-h-14 py-1.5 px-3 bg-[#18181b] border-b border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0">
-                {/* Esquerda: Logo + Título + Ajuda */}
-                <div className="flex items-center gap-2 min-w-0 shrink-0">
-                    <button
-                        onClick={() => navigate('/settings/bots?tab=typebot')}
-                        className="p-1.5 hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-white cursor-pointer shrink-0"
-                        title="Voltar para Fluxos de Bot (Robôs)"
-                    >
-                        <ArrowLeft className="w-4 h-4" />
-                    </button>
-                    
-                    <div className="flex items-center gap-2 min-w-0">
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 border ${
-                            flowData?.active_version_id
-                                ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                                : 'bg-indigo-600/30 border-indigo-500/40 text-indigo-400'
-                        }`}>
-                            ⚡
+                {/* Header Unificado em 1 Linha (SaaS Moderno — Máxima Área de Canvas) */}
+                <header className="h-13 px-3 bg-[#14151a]/95 backdrop-blur-xl border-b border-white/[0.08] flex items-center justify-between gap-2 z-20 shrink-0">
+                    {/* 1. Esquerda: Voltar + Nome do Fluxo + Switch Interativo ON/OFF */}
+                    <div className="flex items-center gap-2 min-w-0 shrink-0">
+                        <button
+                            onClick={() => navigate('/settings/bots?tab=typebot')}
+                            className="p-1.5 hover:bg-white/10 rounded-xl transition-colors flex items-center gap-1 text-zinc-400 hover:text-white cursor-pointer shrink-0"
+                            title="Voltar para Lista de Fluxos de Bot"
+                        >
+                            <ArrowLeft className="w-4 h-4" />
+                        </button>
+
+                        <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                flowData?.active_version_id
+                                    ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                                    : 'bg-indigo-600/20 border-indigo-500/40 text-indigo-400'
+                            }`}>
+                                ⚡
+                            </div>
+                            <h1 className="text-sm font-black text-zinc-100 max-w-[140px] sm:max-w-[200px] truncate" title={flowData?.name}>
+                                {flowData?.name || 'Construtor de Fluxo'}
+                            </h1>
+
+                            {/* Switch ON/OFF Direto no Header do Builder */}
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={Boolean(flowData?.active_version_id)}
+                                disabled={saving}
+                                onClick={handleTogglePauseFlow}
+                                title={
+                                    flowData?.active_version_id
+                                        ? 'Boot ON-LINE: Clique no switch para desativar imediatamente no WhatsApp'
+                                        : 'Boot PAUSADO: Clique no switch para publicar e ativar no WhatsApp'
+                                }
+                                className={`inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full border transition-all cursor-pointer shrink-0 active:scale-95 ${
+                                    flowData?.active_version_id
+                                        ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.35)]'
+                                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                                }`}
+                            >
+                                <span className="text-[10px] font-black uppercase tracking-wider">
+                                    {flowData?.active_version_id ? 'ON-LINE' : 'OFF'}
+                                </span>
+                                <span
+                                    className={`relative inline-flex h-4 w-8 shrink-0 rounded-full p-0.5 transition-colors duration-200 ${
+                                        flowData?.active_version_id ? 'bg-emerald-500' : 'bg-zinc-700'
+                                    }`}
+                                >
+                                    <span
+                                        className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition duration-200 ${
+                                            flowData?.active_version_id ? 'translate-x-4' : 'translate-x-0'
+                                        }`}
+                                    />
+                                </span>
+                            </button>
                         </div>
-                        <h1 className="text-sm font-black text-zinc-100 max-w-[160px] xl:max-w-[220px] truncate" title={flowData?.name}>
-                            {flowData?.name || 'Construtor de Fluxo'}
-                        </h1>
-                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider border whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
-                            flowData?.active_version_id
-                                ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
-                                : 'bg-zinc-800 text-zinc-400 border-zinc-700'
-                        }`}>
-                            <span className={`w-2 h-2 rounded-full ${flowData?.active_version_id ? 'bg-slate-950 animate-ping' : 'bg-zinc-500'}`} />
-                            {flowData?.active_version_id ? '🟢 BOOT ON-LINE & ATIVO' : '⚪ BOOT PAUSADO'}
-                        </span>
                     </div>
 
-                    <button 
-                        onClick={() => setIsHelpOpen(true)}
-                        className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors border border-zinc-800/80 bg-[#202024] active:scale-95 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
-                        title="Abrir Central de Ajuda e Modelos Prontos"
-                    >
-                        <HelpCircle className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                        <span>Ajuda</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => setIsLiveRadarOpen(r => !r)}
-                        className={`flex items-center gap-1.5 text-xs font-extrabold px-3 py-1.5 rounded-lg transition-all border active:scale-95 shadow-sm cursor-pointer whitespace-nowrap shrink-0 ${
-                            isLiveRadarOpen
-                                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-                                : 'bg-[#202024] text-zinc-300 hover:text-white border-zinc-800'
-                        }`}
-                        title="Abrir Radar Ao Vivo de Mensagens, Diagnóstico Técnico e Testador FoodNext"
-                    >
-                        <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>📡 Radar Ao Vivo & Testar FoodNext</span>
-                    </button>
-                </div>
-
-                {/* Centro: Abas do Typebot */}
-                <div className="flex items-center bg-[#202024] p-1 rounded-xl border border-zinc-800 text-xs font-medium overflow-x-auto max-w-full shrink-0">
-                    <button
-                        onClick={() => setActiveTab('fluxo')}
-                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'fluxo' || activeTab === 'share' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
-                    >
-                        Fluxo
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('tema')}
-                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'tema' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
-                    >
-                        Tema & Variáveis
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('config')}
-                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'config' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
-                    >
-                        Configurações
-                    </button>
-                    <button
-                        onClick={() => {
-                            setActiveTab('results');
-                            fetchConversationStates();
-                        }}
-                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'results' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
-                    >
-                        Resultados
-                    </button>
-                </div>
-
-                {/* Direita: Importar + Exportar + Saúde + Visualizar + Salvar + Publicar */}
-                <div className="flex items-center flex-wrap gap-1.5 max-w-full">
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        accept=".json"
-                        onChange={handleImport}
-                    />
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
-                        title="Importar fluxo a partir de arquivo .json (ChatBoot ou Typebot)"
-                    >
-                        <UploadCloud className="w-3.5 h-3.5 shrink-0" />
-                        <span>Importar</span>
-                    </button>
-                    
-                    <button
-                        onClick={handleExportBackup}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
-                        title="Salvar arquivo .json com todo este fluxo para backup"
-                    >
-                        <Share2 className="w-3.5 h-3.5 shrink-0" />
-                        <span>Exportar</span>
-                    </button>
-
-                    <button
-                        onClick={() => setIsHealthOpen(true)}
-                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0 ${
-                            flowHealthIssues.some(i => i.severity === 'error')
-                                ? 'bg-red-500/15 hover:bg-red-500/25 text-red-300 border-red-500/40'
-                                : flowHealthIssues.some(i => i.severity === 'warning')
-                                    ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40'
-                                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        }`}
-                        title="Auditoria Anti-Loop e Integridade do Fluxo"
-                    >
-                        {flowHealthIssues.some(i => i.severity === 'error') ? (
-                            <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                        ) : flowHealthIssues.some(i => i.severity === 'warning') ? (
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        ) : (
-                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        )}
-                        <span className="whitespace-nowrap">
-                            {flowHealthIssues.length > 0
-                                ? `Saúde (${flowHealthIssues.length})`
-                                : 'Anti-Loop ✓'}
-                        </span>
-                    </button>
-
-                    <button
-                        onClick={() => setIsTesting(true)}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
-                        title="Abrir chat de teste em tempo real"
-                    >
-                        <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400 shrink-0" />
-                        <span>Testar</span>
-                    </button>
-
-                    <button
-                        onClick={() => saveFlow(false)}
-                        disabled={saving}
-                        className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
-                        title="Salvar alterações mantendo o status atual (Ativo ou Pausado)"
-                    >
-                        <Save className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                        <span>Salvar</span>
-                    </button>
-
-                    {flowData?.active_version_id ? (
+                    {/* 2. Centro: Navegação Segmentada Limpa */}
+                    <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-medium overflow-x-auto max-w-full shrink-0">
                         <button
-                            onClick={handleTogglePauseFlow}
-                            className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
-                            title="Pausar este fluxo para que ele não responda no WhatsApp"
+                            onClick={() => setActiveTab('fluxo')}
+                            className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'fluxo' || activeTab === 'share' ? 'bg-white/15 text-white shadow-sm font-bold' : 'text-zinc-400 hover:text-zinc-200'}`}
                         >
-                            <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span>Pausar</span>
+                            Canvas
                         </button>
-                    ) : null}
+                        <button
+                            onClick={() => setActiveTab('config')}
+                            className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'config' ? 'bg-white/15 text-white shadow-sm font-bold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        >
+                            Gatilhos & Caixas
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('tema')}
+                            className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'tema' ? 'bg-white/15 text-white shadow-sm font-bold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        >
+                            Variáveis
+                        </button>
+                        <button
+                            onClick={() => {
+                                setActiveTab('results');
+                                fetchConversationStates();
+                            }}
+                            className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'results' ? 'bg-white/15 text-white shadow-sm font-bold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        >
+                            Sessões
+                        </button>
+                    </div>
 
-                    <button
-                        onClick={() => saveFlow(true)}
-                        disabled={saving}
-                        className="bg-[#ff5722] hover:bg-[#f4511e] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 border border-orange-500/30 cursor-pointer whitespace-nowrap shrink-0"
-                        title="Salvar e Ativar este fluxo em Produção no WhatsApp"
-                    >
-                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                        <span>{saving ? 'Publicando...' : 'Publicar no Ar'}</span>
-                    </button>
-                </div>
-            </header>
+                    {/* 3. Direita: Radar Sob Demanda + Saúde + Menu Ferramentas Agrupado + Simular + Salvar/Publicar */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            accept=".json"
+                            onChange={handleImport}
+                        />
+
+                        {/* Toggle do Radar Ao Vivo (recolhido por padrão para liberar o canvas) */}
+                        <button
+                            type="button"
+                            onClick={() => setIsLiveRadarOpen(r => !r)}
+                            className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-xl transition-all border active:scale-95 cursor-pointer whitespace-nowrap ${
+                                isLiveRadarOpen
+                                    ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                                    : 'bg-white/[0.04] text-zinc-300 hover:text-white border-white/10'
+                            }`}
+                            title="Abrir/Fechar Gaveta de Radar Ao Vivo e Testador FoodNext"
+                        >
+                            <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span className="hidden md:inline">Radar Ao Vivo</span>
+                        </button>
+
+                        {/* Auditoria Anti-Loop Compacta */}
+                        <button
+                            onClick={() => setIsHealthOpen(true)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border active:scale-95 cursor-pointer whitespace-nowrap ${
+                                flowHealthIssues.some(i => i.severity === 'error')
+                                    ? 'bg-red-500/15 hover:bg-red-500/25 text-red-300 border-red-500/40'
+                                    : flowHealthIssues.some(i => i.severity === 'warning')
+                                        ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40'
+                                        : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            }`}
+                            title="Auditoria Anti-Loop e Integridade do Fluxo"
+                        >
+                            {flowHealthIssues.some(i => i.severity === 'error') ? (
+                                <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                            ) : flowHealthIssues.some(i => i.severity === 'warning') ? (
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            ) : (
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            )}
+                            <span className="hidden lg:inline">
+                                {flowHealthIssues.length > 0 ? `Saúde (${flowHealthIssues.length})` : 'Saúde ✓'}
+                            </span>
+                        </button>
+
+                        {/* Menu Agrupado: Importar, Exportar e Ajuda */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsToolsMenuOpen(prev => !prev)}
+                                className="bg-white/[0.04] hover:bg-white/[0.08] text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border border-white/10 active:scale-95 cursor-pointer"
+                                title="Importar, Exportar e Central de Ajuda"
+                            >
+                                <MoreHorizontal className="w-4 h-4" />
+                                <span className="hidden xl:inline">Opções</span>
+                            </button>
+
+                            {isToolsMenuOpen && (
+                                <div
+                                    className="absolute right-0 top-10 z-50 w-52 bg-[#181920] border border-white/15 rounded-2xl shadow-2xl p-1.5 flex flex-col gap-1 text-xs animate-in fade-in zoom-in-95 duration-150"
+                                    onMouseLeave={() => setIsToolsMenuOpen(false)}
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsToolsMenuOpen(false);
+                                            setIsHelpOpen(true);
+                                        }}
+                                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-zinc-200 hover:bg-white/10 transition-colors text-left cursor-pointer"
+                                    >
+                                        <HelpCircle className="w-4 h-4 text-indigo-400 shrink-0" />
+                                        <span>Central de Ajuda & Modelos</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsToolsMenuOpen(false);
+                                            fileInputRef.current?.click();
+                                        }}
+                                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-zinc-200 hover:bg-white/10 transition-colors text-left cursor-pointer"
+                                    >
+                                        <UploadCloud className="w-4 h-4 text-emerald-400 shrink-0" />
+                                        <span>Importar Fluxo (.json)</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsToolsMenuOpen(false);
+                                            handleExportBackup();
+                                        }}
+                                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-zinc-200 hover:bg-white/10 transition-colors text-left cursor-pointer"
+                                    >
+                                        <Share2 className="w-4 h-4 text-sky-400 shrink-0" />
+                                        <span>Exportar Backup (.json)</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Simular Chat */}
+                        <button
+                            onClick={() => setIsTesting(true)}
+                            className="bg-white/[0.05] hover:bg-white/10 text-zinc-200 hover:text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-white/10 active:scale-95 cursor-pointer whitespace-nowrap"
+                            title="Abrir Simulador de Conversa"
+                        >
+                            <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400 shrink-0" />
+                            <span>Simular</span>
+                        </button>
+
+                        {/* Salvar Rascunho */}
+                        <button
+                            onClick={() => saveFlow(false)}
+                            disabled={saving}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-zinc-700 active:scale-95 cursor-pointer whitespace-nowrap"
+                            title="Salvar alterações mantendo o status atual"
+                        >
+                            <Save className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                            <span>Salvar</span>
+                        </button>
+
+                        {/* Publicar e Ativar no Ar */}
+                        <button
+                            onClick={() => saveFlow(true)}
+                            disabled={saving}
+                            className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-95 border border-emerald-400/30 cursor-pointer whitespace-nowrap"
+                            title="Salvar e Ativar este fluxo em Produção no WhatsApp"
+                        >
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>{saving ? 'Salvando...' : 'Publicar'}</span>
+                        </button>
+                    </div>
+                </header>
 
             {/* Painel Retrátil Superior: Radar Ao Vivo de Chegada de Mensagens, Diagnóstico Técnico e Testador FoodNext */}
             {isLiveRadarOpen && (
@@ -1656,77 +1720,145 @@ function FlowBuilderContent() {
                 </div>
             ) : (
             <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar Esquerda (Toolbox Drag & Drop Estilo Typebot) */}
-                <div ref={paletteSidebarRef} className="w-64 bg-[#121215] border-r border-zinc-800/80 flex flex-col z-10 shrink-0 overflow-y-auto">
-                    {/* Campo de Busca com Cadeado */}
-                    <div className="p-3 border-b border-zinc-800/60">
-                        <div className="relative flex items-center">
-                            <input
-                                type="text"
-                                placeholder="Search"
-                                value={searchFilter}
-                                onChange={(e) => setSearchFilter(e.target.value)}
-                                className="w-full bg-[#1c1c21] border border-zinc-800/80 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700 pr-8"
-                            />
-                            <Lock className="w-3.5 h-3.5 text-zinc-500 absolute right-2.5 pointer-events-none" />
-                        </div>
+                {/* Sidebar Esquerda Retrátil (Biblioteca de Blocos Organizada por Abas) */}
+                <div
+                    ref={paletteSidebarRef}
+                    className={`${
+                        isPaletteCollapsed ? 'w-11' : 'w-60'
+                    } bg-[#121318] border-r border-white/[0.07] flex flex-col z-10 shrink-0 transition-all duration-200 overflow-hidden`}
+                >
+                    {/* Topo da Sidebar: Busca + Botão de Recolher para Maximizar Canvas */}
+                    <div className="p-2.5 border-b border-white/[0.06] flex items-center justify-between gap-1.5">
+                        {!isPaletteCollapsed && (
+                            <div className="relative flex-1 flex items-center">
+                                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 pointer-events-none" />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar bloco..."
+                                    value={searchFilter}
+                                    onChange={(e) => setSearchFilter(e.target.value)}
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500/50"
+                                />
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setIsPaletteCollapsed(c => !c)}
+                            className="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5 cursor-pointer shrink-0 mx-auto"
+                            title={isPaletteCollapsed ? 'Expandir Biblioteca de Blocos' : 'Recolher Biblioteca para Ampliar o Canvas'}
+                        >
+                            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isPaletteCollapsed ? '' : 'rotate-180'}`} />
+                        </button>
                     </div>
 
-                    {/* Categorias e Blocos (cada botão com submenu de Instruções e Exemplo Funcional) */}
-                    <div className="p-3 flex flex-col gap-4">
-                        <div className="px-2 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-200 leading-snug">
-                            💡 <strong>Clique</strong> em qualquer bloco para abrir <span className="text-white font-semibold">Instruções & Exemplo</span>, ou <strong>arraste</strong> ao canvas.
+                    {isPaletteCollapsed ? (
+                        <div className="flex-1 flex flex-col items-center py-3 gap-3 text-zinc-500">
+                            <button
+                                type="button"
+                                onClick={() => setIsPaletteCollapsed(false)}
+                                className="p-2 rounded-xl hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+                                title="Abrir Blocos de Mensagem"
+                            >
+                                <MessageSquare className="w-4 h-4 text-orange-400" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setIsPaletteCollapsed(false)}
+                                className="p-2 rounded-xl hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+                                title="Abrir Blocos de Pergunta/Input"
+                            >
+                                <MousePointerClick className="w-4 h-4 text-amber-400" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setIsPaletteCollapsed(false)}
+                                className="p-2 rounded-xl hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+                                title="Abrir Condicionais e Lógica"
+                            >
+                                <Filter className="w-4 h-4 text-purple-400" />
+                            </button>
                         </div>
-                        {categories.map((category) => (
-                            <div key={category}>
-                                <h3 className="text-xs font-semibold text-zinc-400 mb-2">{category}</h3>
-                                <div className="grid grid-cols-2 gap-1.5">
-                                    {filteredNodeTypes.filter(n => n.category === category).map((nt) => {
-                                        const theme = getBlockTheme(nt.type);
-                                        const isSubmenuOpen = paletteSubmenu?.type === nt.type;
-                                        return (
-                                            <button
-                                                key={nt.type}
-                                                type="button"
-                                                onDragStart={(event) => {
-                                                    setPaletteSubmenu(null);
-                                                    onDragStart(event, nt.type, nt.label);
-                                                }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                                    const sidebarRight = paletteSidebarRef.current?.getBoundingClientRect().right ?? rect.right;
-                                                    setPaletteSubmenu((prev) =>
-                                                        prev?.type === nt.type
-                                                            ? null
-                                                            : {
-                                                                  type: nt.type,
-                                                                  label: nt.label,
-                                                                  top: Math.max(72, Math.min(rect.top, window.innerHeight - 235)),
-                                                                  left: Math.min(sidebarRight + 8, window.innerWidth - 268),
-                                                              }
-                                                    );
-                                                }}
-                                                draggable
-                                                title={`${nt.label} — Clique para abrir 1-) Instruções de uso e 2-) Exemplo (ou arraste ao canvas)`}
-                                                className={`flex items-center justify-between gap-1.5 p-2 rounded-lg cursor-pointer transition-all text-left group border ${
-                                                    isSubmenuOpen
-                                                        ? 'bg-indigo-600/20 border-indigo-500/60 ring-1 ring-indigo-500/40'
-                                                        : 'bg-[#1c1c21] border-zinc-800/80 hover:bg-[#25252b] hover:border-zinc-700'
-                                                }`}
-                                            >
-                                                <div className="flex items-center gap-1.5 min-w-0">
-                                                    <nt.icon className={`w-3.5 h-3.5 ${theme.iconColor} shrink-0 group-hover:scale-110 transition-transform`} />
-                                                    <span className="text-[11px] font-medium text-zinc-200 truncate">{nt.label}</span>
-                                                </div>
-                                                <ChevronRight className={`w-3 h-3 shrink-0 transition-opacity ${isSubmenuOpen ? 'text-indigo-300 opacity-100' : 'text-zinc-500 opacity-0 group-hover:opacity-100'}`} />
-                                            </button>
-                                        );
-                                    })}
-                                </div>
+                    ) : (
+                        <>
+                            {/* Abas Rápidas de Filtro por Categoria */}
+                            <div className="px-2.5 pt-2 pb-1.5 flex items-center gap-1 overflow-x-auto scrollbar-none border-b border-white/[0.05]">
+                                {[
+                                    { id: 'ALL', label: 'Todos' },
+                                    { id: 'Bubbles', label: 'Msgs' },
+                                    { id: 'Inputs', label: 'Inputs' },
+                                    { id: 'Condicionais', label: 'Lógica' },
+                                    { id: 'Eventos', label: 'Eventos' }
+                                ].map(tab => (
+                                    <button
+                                        key={tab.id}
+                                        type="button"
+                                        onClick={() => setActivePaletteCategory(tab.id)}
+                                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer shrink-0 ${
+                                            activePaletteCategory === tab.id
+                                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                                        }`}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
                             </div>
-                        ))}
-                    </div>
+
+                            {/* Categorias e Blocos */}
+                            <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-3.5 styled-scrollbar">
+                                {categories
+                                    .filter(cat => activePaletteCategory === 'ALL' || cat === activePaletteCategory)
+                                    .map((category) => (
+                                    <div key={category}>
+                                        <h3 className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-500 mb-1.5 px-1">{category}</h3>
+                                        <div className="grid grid-cols-2 gap-1.5">
+                                            {filteredNodeTypes.filter(n => n.category === category).map((nt) => {
+                                                const theme = getBlockTheme(nt.type);
+                                                const isSubmenuOpen = paletteSubmenu?.type === nt.type;
+                                                return (
+                                                    <button
+                                                        key={nt.type}
+                                                        type="button"
+                                                        onDragStart={(event) => {
+                                                            setPaletteSubmenu(null);
+                                                            onDragStart(event, nt.type, nt.label);
+                                                        }}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                            const sidebarRight = paletteSidebarRef.current?.getBoundingClientRect().right ?? rect.right;
+                                                            setPaletteSubmenu((prev) =>
+                                                                prev?.type === nt.type
+                                                                    ? null
+                                                                    : {
+                                                                          type: nt.type,
+                                                                          label: nt.label,
+                                                                          top: Math.max(72, Math.min(rect.top, window.innerHeight - 235)),
+                                                                          left: Math.min(sidebarRight + 8, window.innerWidth - 268),
+                                                                      }
+                                                            );
+                                                        }}
+                                                        draggable
+                                                        title={`${nt.label} — Arraste ao canvas ou clique para adicionar`}
+                                                        className={`flex items-center justify-between gap-1.5 p-2 rounded-xl cursor-pointer transition-all text-left group border ${
+                                                            isSubmenuOpen
+                                                                ? 'bg-indigo-600/20 border-indigo-500/60 ring-1 ring-indigo-500/40'
+                                                                : 'bg-[#1a1b22] border-white/[0.06] hover:bg-[#23252f] hover:border-white/15'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                            <nt.icon className={`w-3.5 h-3.5 ${theme.iconColor} shrink-0 group-hover:scale-110 transition-transform`} />
+                                                            <span className="text-[11px] font-medium text-zinc-200 truncate">{nt.label}</span>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Submenu Flutuante Ancorado FORA da sidebar (zero sobreposição sobre outros botões) */}
@@ -1850,6 +1982,7 @@ function FlowBuilderContent() {
                         onEdgesChange={onEdgesChange}
                         onConnect={onConnect}
                         onNodeClick={handleNodeClick}
+                        onPaneClick={() => setSelectedNode(null)}
                         onDragOver={onDragOver}
                         onDrop={onDrop}
                         fitView
@@ -1872,12 +2005,27 @@ function FlowBuilderContent() {
                     </ReactFlow>
                 </div>
 
-                {/* Properties Sidebar (Direita) */}
+                {/* Properties Inspector Drawer (Direita - com botão Fechar para liberar 100% do Canvas) */}
                 {selectedNode && (
-                    <div className="w-80 bg-slate-800/95 backdrop-blur-2xl border-l border-slate-700/50 p-6 flex flex-col gap-6 animate-in slide-in-from-right z-10 shadow-2xl overflow-y-auto">
-                        <div className="flex items-center gap-3 pb-4 border-b border-slate-700/50">
-                            <Settings2 className="w-5 h-5 text-indigo-400" />
-                            <h3 className="font-bold text-slate-200">Propriedades</h3>
+                    <div className="w-80 sm:w-96 bg-[#13141a]/95 backdrop-blur-2xl border-l border-white/10 p-5 flex flex-col gap-5 animate-in slide-in-from-right z-10 shadow-2xl overflow-y-auto styled-scrollbar">
+                        <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-white/10">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="p-1.5 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 shrink-0">
+                                    <Settings2 className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="text-sm font-bold text-white truncate">Inspector do Bloco</h3>
+                                    <p className="text-[10px] text-zinc-400 truncate">Clique fora no canvas para fechar</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedNode(null)}
+                                className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-xs font-bold border border-white/10 cursor-pointer shrink-0"
+                                title="Fechar Inspector e ampliar o canvas"
+                            >
+                                ✕ Fechar
+                            </button>
                         </div>
 
                         <div className="flex flex-col gap-6">
