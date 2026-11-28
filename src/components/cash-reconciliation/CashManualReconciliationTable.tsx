@@ -425,9 +425,24 @@ export function CashManualReconciliationTable({
                           </span>
                         </td>
                         <td className="py-2.5 px-2.5 align-middle whitespace-nowrap">
-                          <span className="font-black text-rose-600 dark:text-rose-400 tabular-nums text-[13px]">
-                            {formatCents(it.amountCents)}
-                          </span>
+                          {onInspectOperation ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onInspectOperation(it);
+                              }}
+                              title="Clique no valor para ver os itens deste pedido no PDV"
+                              className="inline-flex items-center gap-1 font-black text-rose-600 dark:text-rose-400 hover:text-[#00a884] dark:hover:text-[#00a884] tabular-nums text-[13px] underline decoration-rose-500/45 hover:decoration-[#00a884] decoration-dotted underline-offset-4 active:scale-95 transition-all"
+                            >
+                              <span>{formatCents(it.amountCents)}</span>
+                              <ShoppingBag size={11} className="opacity-75 shrink-0" />
+                            </button>
+                          ) : (
+                            <span className="font-black text-rose-600 dark:text-rose-400 tabular-nums text-[13px]">
+                              {formatCents(it.amountCents)}
+                            </span>
+                          )}
                           {matchRank === 'exact' && !isSelected && (
                             <span className="block text-[9.5px] font-black text-emerald-600 dark:text-emerald-400">
                               Par exato!

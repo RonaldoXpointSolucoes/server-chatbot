@@ -5,7 +5,9 @@ import {
   ArrowUpRight,
   Banknote,
   Calendar,
+  Check,
   CheckCircle2,
+  Pencil,
   Receipt,
   Wallet,
   X
@@ -14,12 +16,19 @@ import { CashDrawerSummary, CashMirrorRow, formatCents } from '../../types/cashR
 
 export type DrawerOutflowModalTab = 'pagamentos' | 'sangria' | 'dinheiro';
 
+export function buildOutflowNoteKey(label: string, amountCents: number): string {
+  return `${String(label || '').trim()}|${Number(amountCents || 0)}`;
+}
+
 interface CashDrawerOutflowsModalProps {
   isOpen: boolean;
   initialTab?: DrawerOutflowModalTab;
   drawer: CashDrawerSummary;
   cashRow?: CashMirrorRow | null;
   dateBadge?: string;
+  outflowNotesByKey?: Record<string, string>;
+  onSaveOutflowNote?: (key: string, note: string) => void;
+  onOpenCashRowDetail?: () => void;
   onClose: () => void;
 }
 
@@ -29,13 +38,20 @@ export const CashDrawerOutflowsModal: React.FC<CashDrawerOutflowsModalProps> = (
   drawer,
   cashRow = null,
   dateBadge = '',
+  outflowNotesByKey = {},
+  onSaveOutflowNote,
+  onOpenCashRowDetail,
   onClose
 }) => {
   const [activeTab, setActiveTab] = useState<DrawerOutflowModalTab>(initialTab);
+  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null);
+  const [draftNoteText, setDraftNoteText] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
+      setEditingNoteKey(null);
+      setDraftNoteText('');
     }
   }, [isOpen, initialTab]);
 
@@ -263,21 +279,90 @@ export const CashDrawerOutflowsModal: React.FC<CashDrawerOutflowsModalProps> = (
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
-                    {classifiedLists.pagamentos.map((item, idx) => (
-                      <div key={`pag_${idx}`} className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-slate-800 dark:text-[#e9edef] break-words">
-                            {item.label}
-                          </p>
-                          <p className="text-[10.5px] text-slate-500 dark:text-[#8696a0]">
-                            {item.source || 'Fechamento TXT'} • Saída do caixa em dinheiro
-                          </p>
+                    {classifiedLists.pagamentos.map((item, idx) => {
+                      const noteKey = buildOutflowNoteKey(item.label, item.amountCents);
+                      const savedNote = String(outflowNotesByKey?.[noteKey] || '').trim();
+                      const isEditing = editingNoteKey === noteKey;
+
+                      return (
+                        <div key={`pag_${idx}`} className="px-4 py-2.5 flex flex-col gap-2 text-xs">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-semibold text-slate-800 dark:text-[#e9edef] break-words">
+                                  {item.label}
+                                </p>
+                                {savedNote && !isEditing && (
+                                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[10.5px] font-bold">
+                                    Obs.: {savedNote}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10.5px] text-slate-500 dark:text-[#8696a0]">
+                                {item.source || 'Fechamento TXT'} • Saída do caixa em dinheiro
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {onSaveOutflowNote && !isEditing && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingNoteKey(noteKey);
+                                    setDraftNoteText(savedNote);
+                                  }}
+                                  className="px-2 py-1 rounded-lg border border-slate-200 dark:border-[#2a3942] hover:border-[#00a884] text-[10.5px] font-bold text-slate-600 dark:text-[#aebac1] flex items-center gap-1"
+                                  title="Anotar do que se refere este pagamento (ex.: coxasobrecoxa)"
+                                >
+                                  <Pencil size={11} />
+                                  {savedNote ? 'Editar obs.' : 'Anotar'}
+                                </button>
+                              )}
+                              <strong className="text-rose-600 dark:text-rose-400 tabular-nums">
+                                -{formatCents(item.amountCents)}
+                              </strong>
+                            </div>
+                          </div>
+
+                          {isEditing && onSaveOutflowNote && (
+                            <div className="flex items-center gap-2 bg-slate-50 dark:bg-[#111b21] p-2 rounded-xl border border-slate-200 dark:border-[#2a3942]">
+                              <input
+                                type="text"
+                                value={draftNoteText}
+                                onChange={(e) => setDraftNoteText(e.target.value)}
+                                placeholder="Ex.: coxasobrecoxa, abacaxi, vale funcionário..."
+                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#202c33] border border-slate-300 dark:border-[#2a3942] text-xs text-slate-900 dark:text-white focus:outline-none focus:border-[#00a884]"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    onSaveOutflowNote(noteKey, draftNoteText.trim());
+                                    setEditingNoteKey(null);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingNoteKey(null);
+                                  }
+                                }}
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onSaveOutflowNote(noteKey, draftNoteText.trim());
+                                  setEditingNoteKey(null);
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[11px] font-bold flex items-center gap-1"
+                              >
+                                <Check size={12} /> Salvar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingNoteKey(null)}
+                                className="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-[#2a3942] text-[11px] text-slate-600 dark:text-[#aebac1]"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <strong className="text-rose-600 dark:text-rose-400 tabular-nums shrink-0">
-                          -{formatCents(item.amountCents)}
-                        </strong>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -560,6 +645,24 @@ export const CashDrawerOutflowsModal: React.FC<CashDrawerOutflowsModalProps> = (
               {swappedToDigitalCents > 0 && (
                 <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/5 px-4 py-2.5 text-xs text-indigo-800 dark:text-indigo-200">
                   Observação: {formatCents(swappedToDigitalCents)} lançados em Dinheiro no PDV foram recebidos via Pix/Cartão e compensados no Total Geral.
+                </div>
+              )}
+
+              {onOpenCashRowDetail && cashRow && Math.abs(Number(cashRow.diffCents || 0)) > 100 && (
+                <div className="rounded-xl border border-orange-500/35 bg-orange-500/10 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-orange-900 dark:text-orange-100">
+                    Diferença de <strong>{formatCents(cashRow.diffCents)}</strong> na gaveta? Veja os pedidos lançados em Dinheiro / Delivery para verificar se algum deveria ser Nota Pendente.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenCashRowDetail();
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-black shrink-0"
+                  >
+                    Analisar Lançamentos em Dinheiro
+                  </button>
                 </div>
               )}
             </div>

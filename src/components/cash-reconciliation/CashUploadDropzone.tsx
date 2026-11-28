@@ -18,8 +18,10 @@ import {
 
 import {
   ParsedCashFileResult,
+  CashQuarantinedSystemFile,
   CashReportCompleteness,
   CashSourcePeriodStat,
+  CashValidationWarning,
   CompanyCashRoutineProfile,
   formatCents
 } from '../../types/cashReconciliation';
@@ -134,6 +136,8 @@ interface CashUploadDropzoneProps {
   reportCompleteness?: CashReportCompleteness | null;
   routineProfile?: CompanyCashRoutineProfile | null;
   sourcePeriodStats?: CashSourcePeriodStat[];
+  wrongDayWarnings?: CashValidationWarning[];
+  quarantinedSystemFiles?: CashQuarantinedSystemFile[];
   openChecklistNonce?: number;
   onAddFiles: (fileList: FileList | File[]) => void;
   onUnlockPasswordFile: (fileId: string, password: string, saveFixed?: boolean) => Promise<boolean> | void;
@@ -151,6 +155,8 @@ export function CashUploadDropzone({
   reportCompleteness = null,
   routineProfile = null,
   sourcePeriodStats = [],
+  wrongDayWarnings = [],
+  quarantinedSystemFiles = [],
   openChecklistNonce = 0,
   onAddFiles,
   onUnlockPasswordFile,
@@ -164,6 +170,25 @@ export function CashUploadDropzone({
   const [isDragging, setIsDragging] = useState(false);
   const [passwordMap, setPasswordMap] = useState<Record<string, string>>({});
   const [isFilesMenuOpen, setIsFilesMenuOpen] = useState<boolean>(false);
+  const prevWrongDayCountRef = useRef<number>(0);
+
+  const wrongDayFileReasonMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const qf of quarantinedSystemFiles || []) {
+      if (qf?.fileName) {
+        map.set(qf.fileName, qf.periodBr ? `Data errada: ${qf.periodBr}` : 'Arquivo de outra data');
+      }
+    }
+    for (const st of sourcePeriodStats || []) {
+      if (st?.fileName && (st.totalRows === 0 || (st.totalRows > 0 && st.keptRows === 0))) {
+        const range = st.periodStart ? formatDateBr(st.periodStart) : 'outra data';
+        map.set(st.fileName, `Sem lançamentos na data (${range})`);
+      }
+    }
+    return map;
+  }, [quarantinedSystemFiles, sourcePeriodStats]);
+
+  const wrongDayAlertCount = Math.max(wrongDayFileReasonMap.size, (wrongDayWarnings || []).length);
 
   const pendingActionCount = useMemo(
     () =>
@@ -178,6 +203,13 @@ export function CashUploadDropzone({
       setIsFilesMenuOpen(true);
     }
   }, [pendingActionCount]);
+
+  useEffect(() => {
+    if (wrongDayAlertCount > prevWrongDayCountRef.current) {
+      setIsFilesMenuOpen(true);
+    }
+    prevWrongDayCountRef.current = wrongDayAlertCount;
+  }, [wrongDayAlertCount]);
 
   useEffect(() => {
     if (openChecklistNonce > 0) {
@@ -284,6 +316,12 @@ export function CashUploadDropzone({
                     {pendingActionCount} requer ação/senha
                   </span>
                 )}
+                {wrongDayAlertCount > 0 && (
+                  <span className="animate-cash-wrong-day-blink inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-600/20 border border-rose-500 text-[10.5px] font-black text-rose-700 dark:text-rose-200">
+                    <AlertTriangle size={11} className="animate-cash-wrong-day-badge text-rose-500 dark:text-rose-300" />
+                    Relatório de data errada ({wrongDayAlertCount})
+                  </span>
+                )}
               </div>
             </div>
 
@@ -335,11 +373,16 @@ export function CashUploadDropzone({
             const meta = FILE_TYPE_META[parsed.fileType || 'unknown'] || FILE_TYPE_META.unknown;
             const isPwd = parsed.status === 'password_required';
             const isErr = parsed.status === 'error';
+            const wrongDayReason = wrongDayFileReasonMap.get(item.fileName);
 
             return (
               <div
                 key={item.id}
-                className="rounded-xl border border-slate-200/80 dark:border-[#2a3942] bg-white/90 dark:bg-[#202c33]/90 backdrop-blur-md p-3 shadow-sm flex flex-col gap-2"
+                className={`rounded-xl border backdrop-blur-md p-3 shadow-sm flex flex-col gap-2 ${
+                  wrongDayReason
+                    ? 'animate-cash-wrong-day-blink border-rose-500 bg-rose-500/15 dark:bg-rose-950/30'
+                    : 'border-slate-200/80 dark:border-[#2a3942] bg-white/90 dark:bg-[#202c33]/90'
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -348,7 +391,12 @@ export function CashUploadDropzone({
                         {meta.icon}
                         {meta.label}
                       </span>
-                      {parsed.status === 'ok' && (
+                      {wrongDayReason && (
+                        <span className="animate-cash-wrong-day-badge px-1.5 py-0.5 rounded-md bg-rose-600 text-white text-[9.5px] font-black uppercase">
+                          Data errada
+                        </span>
+                      )}
+                      {parsed.status === 'ok' && !wrongDayReason && (
                         <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
                       )}
                       {parsed.status === 'ok' && Boolean(parsed.summary?.autoUnlocked) && (
@@ -366,8 +414,8 @@ export function CashUploadDropzone({
                     <p className="text-xs font-semibold text-slate-800 dark:text-[#e9edef] truncate mt-1.5" title={item.fileName}>
                       {item.fileName}
                     </p>
-                    <p className="text-[11px] text-slate-500 dark:text-[#8696a0] mt-0.5">
-                      {formatParsedFileSubtitle(parsed)}
+                    <p className={`text-[11px] mt-0.5 ${wrongDayReason ? 'font-bold text-rose-700 dark:text-rose-300' : 'text-slate-500 dark:text-[#8696a0]'}`}>
+                      {wrongDayReason || formatParsedFileSubtitle(parsed)}
                     </p>
                   </div>
 

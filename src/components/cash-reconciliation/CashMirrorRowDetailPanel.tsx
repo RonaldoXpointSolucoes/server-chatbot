@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
-  XCircle,
   Link2,
   ArrowRightLeft,
   RotateCcw,
@@ -15,7 +14,8 @@ import {
   ArrowUpDown,
   Clock,
   Table2,
-  Calendar
+  Calendar,
+  Truck
 } from 'lucide-react';
 import {
   CashMirrorRow,
@@ -37,6 +37,7 @@ import {
 } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashManualReconciliationTable } from './CashManualReconciliationTable';
 import { CashOperationDetailModal } from './CashOperationDetailModal';
+import { CashSuggestionCard } from './CashSuggestionCard';
 
 export type CashSystemCategoryTarget = 'dinheiro' | 'cartao' | 'pix' | 'pendente';
 type DetailTabKey = 'sobras' | 'faltas' | 'tabela' | 'sugestoes' | 'conciliados' | 'todos';
@@ -90,6 +91,7 @@ interface CashMirrorRowDetailPanelProps {
   onManualLink: (systemIds: string[], realIds: string[], note?: string) => void;
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onReclassifySystemItem: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
+  onReclassifySystemItems?: (systemIds: string[], targetCategory: CashSystemCategoryTarget) => void;
   onClose: () => void;
 }
 
@@ -103,6 +105,7 @@ export function CashMirrorRowDetailPanel({
   onManualLink,
   onIgnoreItem,
   onReclassifySystemItem,
+  onReclassifySystemItems,
   onClose
 }: CashMirrorRowDetailPanelProps) {
   const details = useMemo(() => buildMirrorRowDetails(result, row.key), [result, row.key]);
@@ -146,6 +149,7 @@ export function CashMirrorRowDetailPanel({
   const [sortBy, setSortBy] = useState<DetailSortKey>('amount_desc');
   const [onlyMadrugada, setOnlyMadrugada] = useState(false);
   const [onlyWithCandidate, setOnlyWithCandidate] = useState(false);
+  const [onlyDeliveryItems, setOnlyDeliveryItems] = useState(false);
   const [linkingSystemId, setLinkingSystemId] = useState<string | null>(null);
   const [linkingRealId, setLinkingRealId] = useState<string>('');
   const [linkingExtraId, setLinkingExtraId] = useState<string | null>(null);
@@ -159,6 +163,7 @@ export function CashMirrorRowDetailPanel({
     setSourceFilter('all');
     setOnlyMadrugada(false);
     setOnlyWithCandidate(false);
+    setOnlyDeliveryItems(false);
     setSortBy('amount_desc');
     setActiveTab(
       resolveDetailPanelDefaultTab({
@@ -264,19 +269,44 @@ export function CashMirrorRowDetailPanel({
     [matchedPairs, searchTerm, sourceFilter]
   );
 
+  const deliverySystemItemsCount = useMemo(
+    () =>
+      systemCategoryItems.filter((it) =>
+        /\b(delivery|entrega|ifood|motoboy)\b/i.test(
+          `${it.metadata?.orderDetail?.module || ''} ${it.description || ''}`
+        )
+      ).length,
+    [systemCategoryItems]
+  );
+
   const sortedSystemItems = useMemo(() => {
-    const filtered = systemCategoryItems.filter((it) => itemMatchesQuery(it, qLower));
+    const filtered = systemCategoryItems.filter((it) => {
+      if (!itemMatchesQuery(it, qLower)) return false;
+      if (onlyDeliveryItems) {
+        const isDeliv = /\b(delivery|entrega|ifood|motoboy)\b/i.test(
+          `${it.metadata?.orderDetail?.module || ''} ${it.description || ''}`
+        );
+        if (!isDeliv) return false;
+      }
+      return true;
+    });
+    const absDrawerShortage = row.key === 'saldo_dinheiro' && diff < -100 ? Math.abs(diff) : 0;
     filtered.sort((a, b) => {
       const aMatched = matchedIds.has(a.id) ? 1 : 0;
       const bMatched = matchedIds.has(b.id) ? 1 : 0;
       if (aMatched !== bMatched) return aMatched - bMatched;
+      if (absDrawerShortage > 0) {
+        const aExact = Math.abs(Number(a.amountCents || 0) - absDrawerShortage) <= 5 ? 0 : 1;
+        const bExact = Math.abs(Number(b.amountCents || 0) - absDrawerShortage) <= 5 ? 0 : 1;
+        if (aExact !== bExact) return aExact - bExact;
+      }
       if (sortBy === 'amount_desc') return Number(b.amountCents || 0) - Number(a.amountCents || 0);
       if (sortBy === 'amount_asc') return Number(a.amountCents || 0) - Number(b.amountCents || 0);
       if (sortBy === 'time_desc') return Number(b.secondsOfDay || 0) - Number(a.secondsOfDay || 0);
       return (a.secondsOfDay || 0) - (b.secondsOfDay || 0);
     });
     return filtered;
-  }, [systemCategoryItems, matchedIds, qLower, sortBy]);
+  }, [systemCategoryItems, matchedIds, qLower, onlyDeliveryItems, row.key, diff, sortBy]);
 
   const matchedTotalCents = matchedPairs.reduce((acc, m) => acc + Number(m.amountCents || 0), 0);
   const filteredExtraCents = filteredExtra.reduce((acc, ex) => acc + Number(ex.amountCents || 0), 0);
@@ -807,9 +837,14 @@ export function CashMirrorRowDetailPanel({
                         className="rounded-2xl bg-white dark:bg-[#202c33] border border-rose-500/25 p-3.5 space-y-2 shadow-sm"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-base font-black text-rose-600 dark:text-rose-400 tabular-nums">
+                          <button
+                            type="button"
+                            onClick={() => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
+                            title="Clique no valor para ver os itens do pedido"
+                            className="text-base font-black text-rose-600 dark:text-rose-400 hover:text-[#00a884] dark:hover:text-[#00a884] tabular-nums underline decoration-rose-500/45 hover:decoration-[#00a884] decoration-dotted underline-offset-4 active:scale-95 transition-all"
+                          >
                             {formatCents(it.amountCents)}
-                          </span>
+                          </button>
                           <span className="text-[11px] text-slate-500 dark:text-[#8696a0]">
                             {it.timeStr} • {it.operatorName || '-'} • {it.terminalName || '-'}
                           </span>
@@ -948,42 +983,25 @@ export function CashMirrorRowDetailPanel({
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  <div className="space-y-3">
                     {suggestions.map((sug) => (
-                      <div
+                      <CashSuggestionCard
                         key={sug.id}
-                        className="rounded-2xl border border-amber-500/30 bg-white dark:bg-[#202c33] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                      >
-                        <div className="space-y-1 text-xs">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {sug.reasonType === 'small_diff' && (
-                              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase">
-                                Pequena Diferença
-                              </span>
-                            )}
-                            <span className="text-base font-black text-slate-900 dark:text-white tabular-nums">
-                              {formatCents(sug.amountCents)}
-                            </span>
-                          </div>
-                          <p className="text-[11.5px] font-semibold text-slate-700 dark:text-[#d1d7db]">{sug.reasonText}</p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => onConfirmSuggestion(sug.id)}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"
-                          >
-                            <CheckCircle2 size={13} /> Confirmar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onRejectSuggestion(sug.id)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-[#2a3942] text-xs font-bold text-slate-600 dark:text-[#aebac1] hover:bg-rose-500/10 hover:text-rose-500 flex items-center gap-1"
-                          >
-                            <XCircle size={13} /> Rejeitar
-                          </button>
-                        </div>
-                      </div>
+                        suggestion={sug}
+                        variant="compact"
+                        onConfirmSuggestion={onConfirmSuggestion}
+                        onRejectSuggestion={onRejectSuggestion}
+                        onReclassifySystemItems={(ids, targetCat) => {
+                          if (onReclassifySystemItems) {
+                            onReclassifySystemItems(ids, targetCat);
+                          } else {
+                            ids.forEach((id) => onReclassifySystemItem(id, targetCat));
+                          }
+                        }}
+                        onInspectOperation={(item) =>
+                          setInspectedOp({ item, paired: pairedByItemId.get(item.id) || [] })
+                        }
+                      />
                     ))}
                   </div>
                 )}
@@ -1100,9 +1118,24 @@ export function CashMirrorRowDetailPanel({
                       <p className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-[#aebac1]">
                         Lançamentos do PDV em {row.label} ({sortedSystemItems.length}) — ajuste a forma caso tenha sido lançado errado no caixa
                       </p>
-                      <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#111b21] border border-slate-200 dark:border-[#2a3942] text-xs font-black text-slate-800 dark:text-white tabular-nums">
-                        Soma listada: {formatCents(sortedSystemItems.reduce((acc, it) => acc + Number(it.amountCents || 0), 0))}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {deliverySystemItemsCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setOnlyDeliveryItems((v) => !v)}
+                            className={`px-2.5 py-1 rounded-full border text-[11px] font-bold inline-flex items-center gap-1 transition-all ${
+                              onlyDeliveryItems
+                                ? 'border-indigo-500 bg-indigo-500 text-white'
+                                : 'border-slate-200 dark:border-[#2a3942] bg-slate-100 dark:bg-[#111b21] text-slate-700 dark:text-[#aebac1] hover:border-indigo-500/50'
+                            }`}
+                          >
+                            <Truck size={11} /> Apenas Delivery ({deliverySystemItemsCount})
+                          </button>
+                        )}
+                        <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#111b21] border border-slate-200 dark:border-[#2a3942] text-xs font-black text-slate-800 dark:text-white tabular-nums">
+                          Soma listada: {formatCents(sortedSystemItems.reduce((acc, it) => acc + Number(it.amountCents || 0), 0))}
+                        </span>
+                      </div>
                     </div>
                     {row.key === 'pendentes' && (
                       <div className="space-y-2">
@@ -1174,6 +1207,20 @@ export function CashMirrorRowDetailPanel({
                         const isMatched = matchedIds.has(it.id);
                         const reclassifiedFrom = typeof it.metadata?.reclassifiedFrom === 'string' ? it.metadata.reclassifiedFrom : '';
                         const orderDetail = it.metadata?.orderDetail;
+                        const isDeliveryOrder = /\b(delivery|entrega|ifood|motoboy)\b/i.test(
+                          `${orderDetail?.module || ''} ${it.description || ''}`
+                        );
+                        const absCashShortage = row.key === 'saldo_dinheiro' && diff < -100 ? Math.abs(diff) : 0;
+                        const shortageSimPct =
+                          absCashShortage > 0
+                            ? Math.round(
+                                (1 -
+                                  Math.abs(Number(it.amountCents || 0) - absCashShortage) /
+                                    Math.max(Number(it.amountCents || 0), absCashShortage, 1)) *
+                                  100
+                              )
+                            : 0;
+                        const isHighShortageMatch = absCashShortage > 0 && shortageSimPct >= 75;
                         return (
                           <div key={it.id} className="py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs">
                             <div className="space-y-0.5 min-w-0 flex-1">
@@ -1191,6 +1238,16 @@ export function CashMirrorRowDetailPanel({
                                     {it.description}
                                   </span>
                                 </button>
+                                {isDeliveryOrder && (
+                                  <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px] font-black inline-flex items-center gap-1">
+                                    <Truck size={10} /> Delivery
+                                  </span>
+                                )}
+                                {isHighShortageMatch && (
+                                  <span className="px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/35 text-orange-700 dark:text-orange-300 text-[10px] font-black">
+                                    {shortageSimPct}% da falta ({formatCents(absCashShortage)})
+                                  </span>
+                                )}
                                 {it.metadata?.debtorName ? (
                                   <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-800 dark:text-cyan-200 text-[10.5px] font-black">
                                     Cliente: {it.metadata.debtorName}
@@ -1238,16 +1295,23 @@ export function CashMirrorRowDetailPanel({
 
                             <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                               <span className="text-[10.5px] font-bold text-slate-400 mr-0.5">Mover para:</span>
-                              {targetChoicesForCategory(it.category).map((targetCat) => (
-                                <button
-                                  key={targetCat}
-                                  type="button"
-                                  onClick={() => onReclassifySystemItem(it.id, targetCat)}
-                                  className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-[#2a3942] bg-slate-50 dark:bg-[#111b21] hover:border-[#00a884] hover:text-[#00a884] text-[11px] font-bold text-slate-600 dark:text-[#aebac1] transition-colors"
-                                >
-                                  {CATEGORY_LABELS[targetCat]}
-                                </button>
-                              ))}
+                              {targetChoicesForCategory(it.category).map((targetCat) => {
+                                const highlightPend = it.category === 'dinheiro' && targetCat === 'pendente';
+                                return (
+                                  <button
+                                    key={targetCat}
+                                    type="button"
+                                    onClick={() => onReclassifySystemItem(it.id, targetCat)}
+                                    className={
+                                      highlightPend
+                                        ? 'px-2.5 py-1 rounded-lg border border-orange-500/40 bg-orange-500/15 hover:bg-orange-500 hover:text-white text-[11px] font-black text-orange-700 dark:text-orange-300 transition-colors'
+                                        : 'px-2.5 py-1 rounded-lg border border-slate-200 dark:border-[#2a3942] bg-slate-50 dark:bg-[#111b21] hover:border-[#00a884] hover:text-[#00a884] text-[11px] font-bold text-slate-600 dark:text-[#aebac1] transition-colors'
+                                    }
+                                  >
+                                    {highlightPend ? 'Nota Pendente' : CATEGORY_LABELS[targetCat]}
+                                  </button>
+                                );
+                              })}
                               {reclassifiedFrom && (
                                 <button
                                   type="button"
@@ -1402,6 +1466,7 @@ export function CashMirrorRowDetailPanel({
         operationItem={inspectedOp?.item || null}
         pairedItems={inspectedOp?.paired || []}
         result={result}
+        onReclassifySystemItem={onReclassifySystemItem}
         onClose={() => setInspectedOp(null)}
       />
     </div>

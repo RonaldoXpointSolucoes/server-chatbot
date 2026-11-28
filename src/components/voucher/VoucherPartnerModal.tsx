@@ -26,6 +26,8 @@ import {
   VoucherPartnerCompany,
   voucherService
 } from '../../services/voucherService';
+import { BrlCurrencyInput } from '../ui/BrlCurrencyInput';
+import { parseFormattedBrlToReais } from '../../utils/currencyInputMask.mjs';
 
 interface VoucherPartnerModalProps {
   isOpen: boolean;
@@ -216,9 +218,9 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
       return;
     }
 
-    const monthlyVal = Math.max(0, Number(valorCreditoMensal.replace(',', '.')) || 0);
+    const monthlyVal = Math.max(0, parseFormattedBrlToReais(valorCreditoMensal));
     const discountPct = Math.min(90, Math.max(0, Number(descontoCompraPercent.replace(',', '.')) || 0));
-    const initialBal = Math.max(0, Number(saldoInicial.replace(',', '.')) || 0);
+    const initialBal = Math.max(0, parseFormattedBrlToReais(saldoInicial));
     const limitVch = Math.max(0, parseInt(limiteVouchers || '0', 10) || 0);
 
     setSaving(true);
@@ -490,7 +492,7 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
                       setValorCreditoMensal(String(val));
                     }}
                     className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
-                      creditoMensalAtivo && Number(valorCreditoMensal) === val
+                      creditoMensalAtivo && parseFormattedBrlToReais(valorCreditoMensal) === val
                         ? 'bg-emerald-500 text-slate-950'
                         : 'bg-white/10 text-slate-300 hover:bg-white/15'
                     }`}
@@ -503,13 +505,10 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-[11px] font-medium text-slate-300 mb-1">Valor Mensal (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
+                  <BrlCurrencyInput
                     disabled={!creditoMensalAtivo}
-                    value={valorCreditoMensal}
-                    onChange={(e) => setValorCreditoMensal(e.target.value)}
+                    valueText={valorCreditoMensal}
+                    onChangeText={(val) => setValorCreditoMensal(val)}
                     className="w-full h-11 px-3 rounded-xl bg-slate-900/90 border border-white/15 text-sm text-white disabled:opacity-40 focus:outline-none focus:border-emerald-400"
                   />
                 </div>
@@ -648,13 +647,10 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
                 <Wallet className="w-3.5 h-3.5 text-emerald-400" />
                 {editingPartner ? 'Saldo Atual (Use Recarga)' : 'Saldo Inicial (R$)'}
               </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
+              <BrlCurrencyInput
                 disabled={Boolean(editingPartner)}
-                value={saldoInicial}
-                onChange={(e) => setSaldoInicial(e.target.value)}
+                valueText={saldoInicial}
+                onChangeText={(val) => setSaldoInicial(val)}
                 className="w-full h-11 px-3.5 rounded-xl bg-slate-900/90 border border-white/15 text-sm text-white disabled:opacity-50 focus:outline-none focus:border-emerald-400"
               />
             </div>

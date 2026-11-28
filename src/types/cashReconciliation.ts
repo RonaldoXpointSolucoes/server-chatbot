@@ -133,6 +133,8 @@ export interface CashAuditInsights {
     timeStr?: string;
     waiter?: string;
     operator?: string;
+    machineName?: string;
+    turn?: string;
     reason?: string;
     reasonDetails?: string;
     group?: string;
@@ -218,10 +220,22 @@ export interface CashReconciliationItem {
 
 export interface CashSuggestion {
   id: string;
-  reasonType: 'swapped_method' | 'split_1_to_n' | 'grouped_n_to_1' | 'small_diff';
+  reasonType:
+    | 'swapped_method'
+    | 'split_1_to_n'
+    | 'grouped_n_to_1'
+    | 'small_diff'
+    | 'high_similarity'
+    | 'cash_to_pending'
+    | 'surplus_to_cash'
+    | 'cash_similarity';
   reasonText: string;
   amountCents: number;
   diffCents?: number;
+  similarityPct?: number;
+  suggestedTargetCategory?: 'dinheiro' | 'cartao' | 'pix' | 'pendente';
+  drawerTargetCents?: number;
+  isDelivery?: boolean;
   systemIds: string[];
   realIds: string[];
   systemItems: CashReconciliationItem[];
@@ -329,6 +343,7 @@ export interface CashValidationWarning {
     | 'missing_routine_report'
     | 'wrong_day_system_file'
     | 'pending_totals_mismatch'
+    | 'pending_totals_adjusted'
     | 'cash_drawer_cross_mismatch'
     | 'digital_system_cross_mismatch'
     | 'multi_day_no_anchor'
@@ -410,12 +425,41 @@ export interface CashPeriodDiagnostics {
   validationWarnings: CashValidationWarning[];
 }
 
+export interface CashForcedBalancedInput {
+  enabled: boolean;
+  reason?: string;
+  forcedAt?: string;
+  forcedBy?: string;
+  rawHealthScoreBeforeForce?: number;
+  rawDiffCents?: number;
+}
+
+export interface CashHealthBreakdown {
+  rawHealthScore: number;
+  diffPenaltyPts: number;
+  structuralSugCount: number;
+  structuralSugPenaltyPts: number;
+  smallDiffSugCount: number;
+  smallDiffSugPenaltyPts: number;
+  missingCount: number;
+  missingPenaltyPts: number;
+  extraCount: number;
+  extraPenaltyPts: number;
+  absFocusDiffCents: number;
+  baseVolumeCents: number;
+  totalPenaltyPts: number;
+}
+
 export interface CashReconciliationResult {
   referenceDate: string;
   storeName?: string;
   operatorName?: string;
   status: 'balanced' | 'attention' | 'shortage' | 'surplus';
   healthScore: number;
+  rawHealthScore?: number;
+  isForcedBalanced?: boolean;
+  forcedBalanced?: CashForcedBalancedInput | null;
+  healthBreakdown?: CashHealthBreakdown;
   systemTotalCents: number;
   realTotalCents: number;
   diffTotalCents: number;
@@ -472,6 +516,10 @@ export interface CashManualInputs {
   outrasSaidasOverrideCents?: number | null;
   manualCashAdjustments?: CashManualCashAdjustment[];
   cashDrawerZeroConfirmed?: boolean;
+  pendentesTouched?: boolean;
+  pendentesAutoSynced?: boolean;
+  outflowNotesByKey?: Record<string, string>;
+  forcedBalanced?: CashForcedBalancedInput | null;
   notes?: string;
   shiftLabel?: string;
   categoryRealOverrides?: Record<string, number>;

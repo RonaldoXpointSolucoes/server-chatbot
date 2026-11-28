@@ -1435,3 +1435,349 @@ test('auditoria de rotina esperada alerta falta de relatório salvo (2 C6 + 1 Re
     'C6Pay Resumido deve alertar operador para enviar o modelo Detalhado'
   );
 });
+
+test('runCashReconciliation detects Delivery Dinheiro orders matching drawer shortage and applies Dinheiro -> Pendente reclassification', () => {
+  const pdvFile = {
+    fileType: 'pdv_vendas',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, numero: '42', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 9709, receivedCents: 9709, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '20:15:00', secondsOfDay: 72900, operador: 'MARCELA', nomeMaquina: 'CAIXA' },
+      { rowIndex: 2, numero: '10', modulo: 'MESA', origem: 'MESA', amountCents: 5000, receivedCents: 5000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '19:10:00', secondsOfDay: 69000, operador: 'MARCELA', nomeMaquina: 'CAIXA' },
+      { rowIndex: 3, numero: '15', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 33638, receivedCents: 33638, recebidoEmBranco: false, changeCents: 0, formaPagto: 'NOTA PENDENTE', administradora: '', category: 'pendente', subType: 'pendente', dateStr: '2026-11-25', timeStr: '21:00:00', secondsOfDay: 75600, operador: 'MARCELA', nomeMaquina: 'CAIXA' }
+    ]
+  };
+  const relConf = {
+    fileType: 'rel_conferencia',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    summary: {
+      systemRows: {
+        saldo_dinheiro: 42719,
+        cartao: 0,
+        pendentes: 33638,
+        pix: 0
+      },
+      realRows: {
+        saldo_dinheiro: 33010
+      },
+      cashBlock: {
+        fundoManhaCents: 28010,
+        vendaDinheiroCents: 14709,
+        saidasPagamentosCents: 0,
+        sangriaManhaCents: 0,
+        sangriaNoiteCents: 0,
+        outrasSaidasCents: 0,
+        outrasEntradasCents: 0,
+        fundoNoiteCents: 0
+      }
+    }
+  };
+
+  // Falta física na gaveta: 330,10 - 427,19 = -97,09 (-9709 cents), idêntica ao Delivery #42 em Dinheiro
+  const before = runCashReconciliation({
+    parsedFiles: [pdvFile, relConf],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: {
+      cashCountedCents: 33010,
+      cashDrawerZeroConfirmed: false,
+      categoryRealOverrides: { pendentes: 33638 },
+      pendentesAutoSynced: true
+    }
+  });
+
+  const deliveryItem = before.systemItems.find((s) => s.referenceCode === '42');
+  assert.ok(deliveryItem);
+
+  const cashToPending = before.suggestions.find((s) => s.reasonType === 'cash_to_pending');
+  assert.ok(cashToPending, 'Deve sugerir pedido Delivery em Dinheiro como provável Nota Pendente quando bate com falta na gaveta');
+  assert.equal(cashToPending.suggestedTargetCategory, 'pendente');
+  assert.equal(cashToPending.similarityPct, 100);
+  assert.deepEqual(cashToPending.systemIds, [deliveryItem.id]);
+
+  // Ao reclassificar o pedido #42 de dinheiro -> pendente, a falta no dinheiro zera (-97,09 -> 0) e pendentes sobe +97,09
+  const after = runCashReconciliation({
+    parsedFiles: [pdvFile, relConf],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: {
+      cashCountedCents: 33010,
+      cashDrawerZeroConfirmed: false,
+      categoryRealOverrides: { pendentes: 33638 },
+      pendentesAutoSynced: true
+    },
+    manualResolutions: [{ action: 'reclassify_system', systemIds: [deliveryItem.id], targetCategory: 'pendente' }]
+  });
+
+  const rowDin = after.mirrorRows.find((r) => r.key === 'saldo_dinheiro');
+  const rowPend = after.mirrorRows.find((r) => r.key === 'pendentes');
+  assert.equal(rowDin.systemCents, 33010);
+  assert.equal(rowDin.diffCents, 0);
+  assert.equal(rowPend.systemCents, 43347);
+  assert.equal(after.suggestions.filter((s) => s.reasonType === 'cash_to_pending').length, 0);
+});
+
+test('runCashReconciliation suggests high-similarity Dinheiro candidates for shortages, 2-order Delivery sums, surpluses, and extraInBank', () => {
+  // 1) Alta semelhança aproximada com falta na gaveta (-100,00 vs Delivery 95,00) e soma de 2 Delivery (52,09 + 45,00 = 97,09)
+  const pdvApprox = {
+    fileType: 'pdv_vendas',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, numero: '101', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 9500, receivedCents: 9500, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '19:30:00', secondsOfDay: 70200, operador: 'Op1', nomeMaquina: 'CX1' },
+      { rowIndex: 2, numero: '102', modulo: 'MESA', origem: 'MESA', amountCents: 2000, receivedCents: 2000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '18:00:00', secondsOfDay: 64800, operador: 'Op1', nomeMaquina: 'CX1' }
+    ]
+  };
+  const approxRes = runCashReconciliation({
+    parsedFiles: [pdvApprox],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: 1500, cashDrawerZeroConfirmed: false }
+  });
+  const approxItem = approxRes.systemItems.find((s) => s.referenceCode === '101');
+  const approxSug = approxRes.suggestions.find(
+    (s) => s.reasonType === 'cash_to_pending' && s.systemIds.includes(approxItem?.id)
+  );
+  assert.ok(approxSug, 'Deve sugerir Delivery R$ 95,00 por alta semelhança (95%) contra falta de -R$ 100,00');
+  assert.ok(approxSug.similarityPct >= 90);
+
+  // 1B) Soma de 2 pedidos Delivery em Dinheiro (52,09 + 45,00 = 97,09) explicando falta de -97,09
+  const pdvPair = {
+    fileType: 'pdv_vendas',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, numero: '111', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 5209, receivedCents: 5209, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '19:40:00', secondsOfDay: 70800, operador: 'Op1', nomeMaquina: 'CX1' },
+      { rowIndex: 2, numero: '112', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 4500, receivedCents: 4500, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '20:05:00', secondsOfDay: 72300, operador: 'Op1', nomeMaquina: 'CX1' },
+      { rowIndex: 3, numero: '113', modulo: 'MESA', origem: 'MESA', amountCents: 3000, receivedCents: 3000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '18:30:00', secondsOfDay: 66600, operador: 'Op1', nomeMaquina: 'CX1' }
+    ]
+  };
+  const pairRes = runCashReconciliation({
+    parsedFiles: [pdvPair],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: 3000, cashDrawerZeroConfirmed: false }
+  });
+  const pairSug = pairRes.suggestions.find((s) => s.reasonType === 'cash_to_pending' && s.systemIds.length === 2);
+  assert.ok(pairSug, 'Deve sugerir soma de 2 pedidos Delivery (52,09 + 45,00) quando explica 100% a falta de -R$ 97,09');
+  assert.equal(pairSug.amountCents, 9709);
+  assert.equal(pairSug.similarityPct, 100);
+
+  // 2) Sobra no banco (PIX R$ 73,50) com alta semelhança contra venda Delivery em Dinheiro (R$ 75,00) + sobra física +60,00 vs Pendente 60,00
+  const pdvSimilarity = {
+    fileType: 'pdv_vendas',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, numero: '201', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 7500, receivedCents: 7500, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '20:00:00', secondsOfDay: 72000, operador: 'Op1', nomeMaquina: 'CX1' },
+      { rowIndex: 2, numero: '202', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 6000, receivedCents: 6000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'NOTA PENDENTE', administradora: '', category: 'pendente', subType: 'pendente', dateStr: '2026-11-25', timeStr: '20:10:00', secondsOfDay: 72600, operador: 'Op1', nomeMaquina: 'CX1' }
+    ]
+  };
+  const ofxExtra = {
+    fileType: 'extrato_ofx',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, source: 'ofx', ofxClass: 'pix_cliente', isCredit: true, isPdvEligible: true, category: 'pix', subType: 'pix', amountCents: 7350, description: 'PIX CLIENTE', dateStr: '2026-11-25', timeStr: '20:02:00', secondsOfDay: 72120, hasTime: true }
+    ]
+  };
+  // Gaveta tem R$ 135,00 contra R$ 75,00 em Dinheiro esperado (+R$ 60,00 de sobra!) -> bate com Pendente R$ 60,00
+  const simRes = runCashReconciliation({
+    parsedFiles: [pdvSimilarity, ofxExtra],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: 13500, cashDrawerZeroConfirmed: false }
+  });
+  const cashSim = simRes.suggestions.find((s) => s.reasonType === 'cash_similarity');
+  assert.ok(cashSim, 'Deve sugerir vínculo de alta semelhança entre venda Dinheiro (R$ 75,00) e sobra PIX (R$ 73,50)');
+  assert.equal(cashSim.suggestedTargetCategory, 'pix');
+  assert.ok(cashSim.similarityPct >= 95);
+
+  const surplusCash = simRes.suggestions.find((s) => s.reasonType === 'surplus_to_cash');
+  assert.ok(surplusCash, 'Deve sugerir pedido Pendente R$ 60,00 como possível Dinheiro quando há sobra física de +R$ 60,00');
+  assert.equal(surplusCash.suggestedTargetCategory, 'dinheiro');
+});
+
+test('25/11 lessons: suppresses false cash_drawer_txt_hint when Sangria covers TXT, avoids Pendentes error after reclassify_system, flags Delivery+Mesa mix on N:1 and surfaces high_similarity digital matches (84,64 vs 74,71 & 38 vs 45)', () => {
+  const pdv25 = {
+    fileType: 'pdv_vendas',
+    fileName: 'PlanilhaRecebimento_25_11.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, numero: '1', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 9700, receivedCents: 9700, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '12:15:00', secondsOfDay: 44100, operador: 'MARCELA', nomeMaquina: 'CX1' },
+      { rowIndex: 2, numero: '10', modulo: 'MESA', origem: 'MESA', amountCents: 33019 - 9700 + 11673 - 21585 - 10000, receivedCents: 33019 - 9700 + 11673 - 21585 - 10000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: '', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '14:00:00', secondsOfDay: 50400, operador: 'MARCELA', nomeMaquina: 'CX1' },
+      { rowIndex: 3, numero: '99', modulo: 'MESA', origem: 'MESA', amountCents: 33638, receivedCents: 33638, recebidoEmBranco: false, changeCents: 0, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'pendente', dateStr: '2026-11-25', timeStr: '11:30:00', secondsOfDay: 41400, operador: 'MARCELA', nomeMaquina: 'CX1' },
+      { rowIndex: 4, numero: '9', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 3800, receivedCents: 3800, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'DEBITO', category: 'cartao', subType: 'debito', dateStr: '2026-11-25', timeStr: '13:16:47', secondsOfDay: 13 * 3600 + 16 * 60 + 47, operador: 'MARCELA', nomeMaquina: 'CX1' },
+      { rowIndex: 5, numero: '015', modulo: 'MESA', origem: 'MESA', amountCents: 700, receivedCents: 700, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'DEBITO', category: 'cartao', subType: 'debito', dateStr: '2026-11-25', timeStr: '13:38:00', secondsOfDay: 13 * 3600 + 38 * 60, operador: 'MARCELA', nomeMaquina: 'CX1' },
+      { rowIndex: 6, numero: '015', modulo: 'MESA', origem: 'MESA', amountCents: 8464, receivedCents: 8464, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'PIX', category: 'pix', subType: 'pix', dateStr: '2026-11-25', timeStr: '21:47:42', secondsOfDay: 21 * 3600 + 47 * 60 + 42, operador: 'MARCELA', nomeMaquina: 'CX1' }
+    ]
+  };
+  const txt25 = {
+    fileType: 'fechamento_txt',
+    fileName: 'Mov.Caixa_25_11.txt',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    summary: {
+      startDate: '2026-11-25',
+      endDate: '2026-11-25',
+      fundoCaixaCents: 21585,
+      saidasTotalCents: 11673,
+      saldoDinheiroCents: 33010,
+      sangriaTotalCents: 33010,
+      notaPendenteCents: 33638,
+      pendingDebtors: [{ debtor: 'CLIENTE PENDENTE', amountCents: 33638 }],
+      saidasItens: [
+        { label: '** Baixa em Contas a Pagar Ref. 64,74', amountCents: 6474, isSangria: false },
+        { label: 'Vale / Despesa Diversa', amountCents: 5199, isSangria: false },
+        { label: 'SANGRIA CX. RET', amountCents: 33010, isSangria: true }
+      ]
+    }
+  };
+  const rel25 = {
+    fileType: 'rel_conferencia',
+    fileName: 'RelConferencia_25_11.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    summary: {
+      parsedCategoryCount: 4,
+      cashBlock: {
+        fundoManhaCents: 21585,
+        vendaDinheiroCents: 22807,
+        fundoNoiteCents: 0,
+        outrasEntradasCents: 10000,
+        sangriaManhaCents: 0,
+        sangriaNoiteCents: 33010,
+        saidasPagamentosCents: 11673,
+        outrasSaidasCents: 0
+      },
+      systemRows: {
+        saldo_dinheiro: 42719,
+        pendentes: 33638
+      },
+      realRows: {
+        pendentes: 43338
+      }
+    }
+  };
+  const c6Pay25 = {
+    fileType: 'adquirente_c6pay',
+    fileName: 'Relatorio_C6Pay_25_11.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'debito', brand: 'VISA', amountCents: 4500, feeCents: 50, netCents: 4450, dateStr: '2026-11-25', timeStr: '13:37:07', secondsOfDay: 13 * 3600 + 37 * 60 + 7, hasTime: true }
+    ]
+  };
+  const rede25 = {
+    fileType: 'adquirente_rede',
+    fileName: 'Rede_25_11.csv',
+    status: 'ok',
+    periodStart: '2026-11-25',
+    periodEnd: '2026-11-25',
+    rows: [
+      { rowIndex: 1, source: 'rede', isApproved: true, category: 'pix', subType: 'pix', brand: 'PIX', amountCents: 7471, feeCents: 0, netCents: 7471, dateStr: '2026-11-25', timeStr: '21:34:00', secondsOfDay: 21 * 3600 + 34 * 60, hasTime: true }
+    ]
+  };
+
+  const delivery1ItemId = runCashReconciliation({ parsedFiles: [pdv25] }).systemItems.find((i) => i.referenceCode === '1' && i.amountCents === 9700)?.id;
+  assert.ok(delivery1ItemId);
+
+  const res = runCashReconciliation({
+    parsedFiles: [pdv25, txt25, rel25, c6Pay25, rede25],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: {
+      cashCountedCents: 0,
+      cashDrawerZeroConfirmed: false,
+      categoryRealOverrides: { pendentes: 43338 }
+    },
+    manualResolutions: [
+      { action: 'reclassify_system', systemIds: [delivery1ItemId], targetCategory: 'pendente' }
+    ]
+  });
+
+  // 1) Não deve emitir cash_drawer_txt_hint (-R$ 330,10) pois a Sangria (R$ 330,10) já cobre a Fita TXT e resta só R$ 0,09
+  assert.equal(
+    res.periodDiagnostics.validationWarnings.some((w) => w.code === 'cash_drawer_txt_hint'),
+    false,
+    'Não deve alertar Saldo em dinheiro na gaveta zerado quando Sangria já cobre TXT'
+  );
+
+  // 2) Após reclassificar Delivery 1 (97,00) para Pendente, PDV original (336,38) bate com TXT: sem erro vermelho!
+  assert.equal(
+    res.periodDiagnostics.validationWarnings.some((w) => w.code === 'pending_totals_mismatch'),
+    false,
+    'Não deve disparar erro pending_totals_mismatch quando divergência decorre de ajuste manual p/ Pendente'
+  );
+  const adjustedWarn = res.periodDiagnostics.validationWarnings.find((w) => w.code === 'pending_totals_adjusted');
+  assert.ok(adjustedWarn, 'Deve informar ajuste manual de Notas Pendentes sem alarme de erro');
+  assert.equal(adjustedWarn.severity, 'info');
+  assert.equal(res.periodDiagnostics.integrityChecks.pendentesMatchAcrossReports, true);
+
+  // 3) N:1 que mistura DELIVERY 9 + MESA 015 deve sinalizar cautela de taxa de entrega no Delivery
+  const groupedDelivery = res.suggestions.find((s) => s.reasonType === 'grouped_n_to_1');
+  assert.ok(groupedDelivery);
+  assert.equal(groupedDelivery.isDelivery, true);
+  assert.match(groupedDelivery.reasonText, /Delivery.*Mesa|taxa de entrega/i);
+
+  // 4) PIX MESA 015 (84,64) vs Rede PIX (74,71) -> alta semelhança (88%, dif -R$ 9,93 em 14 min)
+  const pixSimSug = res.suggestions.find(
+    (s) => s.reasonType === 'high_similarity' && s.systemItems?.[0]?.amountCents === 8464 && s.realItems?.[0]?.amountCents === 7471
+  );
+  assert.ok(pixSimSug, 'Deve sugerir vínculo de alta semelhança entre MESA 015 PIX (84,64) e Rede PIX (74,71)');
+  assert.equal(pixSimSug.similarityPct, 88);
+  assert.equal(pixSimSug.diffCents, -993);
+
+  // 5) Se o usuário rejeitar o agrupamento N:1 (DELIVERY 9 + MESA 015), deve emergir sugestão de Delivery + taxa (38,00 -> 45,00, +7,00)
+  const resAfterReject = runCashReconciliation({
+    parsedFiles: [pdv25, txt25, rel25, c6Pay25, rede25],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: 0, cashDrawerZeroConfirmed: false, categoryRealOverrides: { pendentes: 43338 } },
+    manualResolutions: [
+      { action: 'reclassify_system', systemIds: [delivery1ItemId], targetCategory: 'pendente' },
+      { action: 'reject_suggestion', suggestionId: groupedDelivery.id }
+    ]
+  });
+  const deliveryFeeSim = resAfterReject.suggestions.find(
+    (s) => s.reasonType === 'high_similarity' && s.systemItems?.[0]?.amountCents === 3800 && s.realItems?.[0]?.amountCents === 4500
+  );
+  assert.ok(deliveryFeeSim, 'Ao rejeitar N:1, deve sugerir DELIVERY 9 (38,00) vs C6 Pay (45,00) como possível taxa de entrega (+7,00)');
+  assert.equal(deliveryFeeSim.isDelivery, true);
+  assert.equal(deliveryFeeSim.similarityPct, 84);
+  assert.equal(deliveryFeeSim.diffCents, 700);
+
+  // 6) Decomposição detalhada de healthBreakdown + Forçamento a 100% preservando Sobra (+R$ 9,03) e score real
+  assert.ok(res.healthBreakdown, 'Motor deve retornar healthBreakdown detalhando pontos perdidos');
+  assert.equal(res.healthBreakdown.rawHealthScore, res.healthScore);
+  assert.equal(res.isForcedBalanced, false);
+
+  const forcedRes = runCashReconciliation({
+    parsedFiles: [pdv25, txt25, rel25, c6Pay25, rede25],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: {
+      cashCountedCents: 0,
+      cashDrawerZeroConfirmed: false,
+      categoryRealOverrides: { pendentes: 43338 },
+      forcedBalanced: {
+        enabled: true,
+        reason: 'Sobra de R$ 9,03 conferida no Turno Noite'
+      }
+    },
+    manualResolutions: [
+      { action: 'reclassify_system', systemIds: [delivery1ItemId], targetCategory: 'pendente' }
+    ]
+  });
+  assert.equal(forcedRes.healthScore, 100);
+  assert.equal(forcedRes.isForcedBalanced, true);
+  assert.equal(forcedRes.rawHealthScore, res.healthScore);
+  assert.equal(forcedRes.forcedBalanced.reason, 'Sobra de R$ 9,03 conferida no Turno Noite');
+  assert.equal(forcedRes.diffTotalCents, res.diffTotalCents, 'Forçar 100% nunca pode apagar a Sobra/Falta real');
+  assert.equal(forcedRes.status, res.status, 'Status financeiro real (sobra/falta) deve permanecer intacto');
+});
+

@@ -9,7 +9,9 @@ import {
   Percent,
   UserCheck,
   Clock,
-  Receipt
+  Receipt,
+  ArrowRightLeft,
+  RotateCcw
 } from 'lucide-react';
 import {
   CashReconciliationItem,
@@ -19,10 +21,20 @@ import {
 import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { formatReopenedTableAudit, normalizeOrderNumber } from '../../utils/cashOperationItemsHelper.mjs';
 
+export type CashSystemCategoryTarget = 'dinheiro' | 'cartao' | 'pix' | 'pendente';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  dinheiro: 'Dinheiro',
+  cartao: 'Cartão',
+  pix: 'Pix',
+  pendente: 'Nota Pendente'
+};
+
 interface CashOperationDetailModalProps {
   operationItem: CashReconciliationItem | null;
   pairedItems?: CashReconciliationItem[];
   result: CashReconciliationResult;
+  onReclassifySystemItem?: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
   onClose: () => void;
 }
 
@@ -30,6 +42,7 @@ export function CashOperationDetailModal({
   operationItem,
   pairedItems = [],
   result,
+  onReclassifySystemItem,
   onClose
 }: CashOperationDetailModalProps) {
   useEffect(() => {
@@ -44,21 +57,24 @@ export function CashOperationDetailModal({
   if (!operationItem || typeof document === 'undefined') return null;
 
   // Se o operador clicou em um lançamento Real conciliado, busca o pedido PDV vinculado para exibir os itens!
-  const systemAnchor =
+  const rawSystemAnchor =
     operationItem.side === 'system'
       ? operationItem
       : pairedItems.find((p) => p.side === 'system') || operationItem;
+
+  const systemAnchor =
+    (rawSystemAnchor.side === 'system'
+      ? result.systemItems?.find((s) => s.id === rawSystemAnchor.id)
+      : undefined) || rawSystemAnchor;
 
   const realAnchors =
     operationItem.side === 'real'
       ? [operationItem]
       : pairedItems.filter((p) => p.side === 'real');
 
-  const orderDetail =
-    systemAnchor.metadata?.orderDetail ||
-    (systemAnchor.side === 'system'
-      ? result.systemItems?.find((s) => s.id === systemAnchor.id)?.metadata?.orderDetail
-      : undefined);
+  const orderDetail = systemAnchor.metadata?.orderDetail;
+  const reclassifiedFrom =
+    typeof systemAnchor.metadata?.reclassifiedFrom === 'string' ? systemAnchor.metadata.reclassifiedFrom : '';
   const normRef = normalizeOrderNumber(systemAnchor.referenceCode || orderDetail?.orderNumber || '');
 
   const audit = result.auditInsights;
@@ -135,6 +151,71 @@ export function CashOperationDetailModal({
 
         {/* Conteúdo */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs">
+          {/* Ajuste Manual de Forma de Pagamento no Caixa */}
+          {systemAnchor.side === 'system' && onReclassifySystemItem && (
+            <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] bg-slate-50/90 dark:bg-[#202c33]/75 p-4 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 dark:text-[#e9edef] inline-flex items-center gap-1.5">
+                    <ArrowRightLeft size={13} className="text-[#00a884]" />
+                    Forma no PDV:{' '}
+                    <strong className="text-[#008f6f] dark:text-[#00a884]">
+                      {CATEGORY_LABELS[systemAnchor.category] || systemAnchor.category.toUpperCase()}
+                    </strong>
+                  </span>
+                  {reclassifiedFrom && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold">
+                      Ajustado de {CATEGORY_LABELS[reclassifiedFrom] || reclassifiedFrom}
+                    </span>
+                  )}
+                </div>
+
+                {systemAnchor.category === 'dinheiro' && (
+                  <button
+                    type="button"
+                    onClick={() => onReclassifySystemItem(systemAnchor.id, 'pendente')}
+                    className="px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-black inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  >
+                    <ArrowRightLeft size={12} /> Dinheiro → Nota Pendente
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10.5px] font-bold text-slate-500 dark:text-[#8696a0] mr-1">
+                  Alterar pagamento para:
+                </span>
+                {(['dinheiro', 'cartao', 'pix', 'pendente'] as CashSystemCategoryTarget[]).map((cat) => {
+                  const isCurrent = systemAnchor.category === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      disabled={isCurrent}
+                      onClick={() => onReclassifySystemItem(systemAnchor.id, cat)}
+                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                        isCurrent
+                          ? 'border-[#00a884] bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] cursor-default'
+                          : 'border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-slate-600 dark:text-[#aebac1] hover:border-[#00a884] hover:text-[#00a884]'
+                      }`}
+                    >
+                      {CATEGORY_LABELS[cat]}
+                    </button>
+                  );
+                })}
+                {reclassifiedFrom && (
+                  <button
+                    type="button"
+                    onClick={() => onReclassifySystemItem(systemAnchor.id, null)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 text-[11px] font-bold inline-flex items-center gap-1"
+                  >
+                    <RotateCcw size={11} /> Desfazer
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Pagamentos Banco/Adquirente vinculados */}
           {realAnchors.length > 0 && (
             <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4 space-y-2.5">

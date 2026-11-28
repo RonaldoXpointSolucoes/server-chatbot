@@ -22,10 +22,12 @@ import {
   RECONCILIATION_GLOSSARY,
   buildGeneralDiffSummary,
   buildLinkableSystemPool,
+  buildPairedItemsByIdMap,
   formatDateBr
 } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashManualReconciliationTable } from './CashManualReconciliationTable';
-import { CashOperationDetailModal } from './CashOperationDetailModal';
+import { CashOperationDetailModal, CashSystemCategoryTarget } from './CashOperationDetailModal';
+import { CashSuggestionCard } from './CashSuggestionCard';
 
 export type GeneralDiffTabKey = 'tabela' | 'sugestoes' | 'canais' | 'conciliados';
 
@@ -37,6 +39,8 @@ interface CashGeneralDiffModalProps {
   onRejectSuggestion: (suggestionId: string) => void;
   onManualLink: (systemIds: string[], realIds: string[], note?: string) => void;
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
+  onReclassifySystemItem?: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
+  onReclassifySystemItems?: (systemIds: string[], targetCategory: CashSystemCategoryTarget) => void;
   onUndoLastResolution?: () => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
   onClose: () => void;
@@ -56,6 +60,8 @@ export function CashGeneralDiffModal({
   onRejectSuggestion,
   onManualLink,
   onIgnoreItem,
+  onReclassifySystemItem,
+  onReclassifySystemItems,
   onUndoLastResolution,
   onOpenMirrorCategory,
   onClose
@@ -106,16 +112,10 @@ export function CashGeneralDiffModal({
   }, [onClose, inspectedOp]);
 
   const matchedPairs = result.matchedPairs || [];
-  const pairedByItemId = useMemo(() => {
-    const map = new Map<string, CashReconciliationItem[]>();
-    for (const pair of matchedPairs) {
-      const combined = [...(pair.systemItems || []), ...(pair.realItems || [])];
-      for (const it of combined) {
-        map.set(it.id, combined);
-      }
-    }
-    return map;
-  }, [matchedPairs]);
+  const pairedByItemId = useMemo(
+    () => buildPairedItemsByIdMap(matchedPairs) as Map<string, CashReconciliationItem[]>,
+    [matchedPairs]
+  );
 
   const diffCents = Number(result.diffTotalCents || 0);
   const matchedTotalCents = matchedPairs.reduce((acc, p) => acc + Number(p.amountCents || 0), 0);
@@ -444,64 +444,22 @@ export function CashGeneralDiffModal({
                 ) : (
                   <div className="space-y-3">
                     {summary.suggestions.map((sug: CashSuggestion) => (
-                      <div
+                      <CashSuggestionCard
                         key={sug.id}
-                        className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                      >
-                        <div className="space-y-1.5 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase inline-flex items-center gap-1">
-                              <Sparkles size={11} />
-                              {sug.reasonType === 'swapped_method'
-                                ? 'Troca de Pagamento'
-                                : sug.reasonType === 'split_1_to_n'
-                                  ? 'Pagamento Dividido (1:N)'
-                                  : sug.reasonType === 'small_diff'
-                                    ? 'Pequena Diferença (Troco / Taxa)'
-                                    : 'Agrupado (N:1)'}
-                            </span>
-                            <span className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
-                              {formatCents(sug.amountCents)}
-                            </span>
-                          </div>
-                          <p className="text-xs font-semibold text-slate-700 dark:text-[#d1d7db]">{sug.reasonText}</p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 text-[11px]">
-                            <div className="rounded-xl bg-white/90 dark:bg-[#111b21] px-3 py-2 border border-slate-200/70 dark:border-[#2a3942]">
-                              <p className="font-bold text-rose-500 uppercase text-[9.5px]">{RECONCILIATION_GLOSSARY.missing.title} (PDV)</p>
-                              {(sug.systemItems || []).map((s) => (
-                                <p key={s.id} className="text-slate-700 dark:text-[#e9edef] font-medium">
-                                  {s.timeStr} • {s.description} — <strong>{formatCents(s.amountCents)}</strong>
-                                </p>
-                              ))}
-                            </div>
-                            <div className="rounded-xl bg-white/90 dark:bg-[#111b21] px-3 py-2 border border-slate-200/70 dark:border-[#2a3942]">
-                              <p className="font-bold text-indigo-500 uppercase text-[9.5px]">{RECONCILIATION_GLOSSARY.extra.title} (Banco)</p>
-                              {(sug.realItems || []).map((r) => (
-                                <p key={r.id} className="text-slate-700 dark:text-[#e9edef] font-medium">
-                                  {r.timeStr} • {r.description} — <strong>{formatCents(r.amountCents)}</strong>
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => onConfirmSuggestion(sug.id)}
-                            className="px-3.5 py-2 min-h-[40px] rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
-                          >
-                            <CheckCircle2 size={14} /> Confirmar Dica
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onRejectSuggestion(sug.id)}
-                            className="px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 dark:border-[#2a3942] hover:bg-rose-500/10 hover:text-rose-500 text-slate-600 dark:text-[#aebac1] text-xs font-bold flex items-center gap-1 active:scale-95 transition-all"
-                          >
-                            <XCircle size={14} /> Rejeitar
-                          </button>
-                        </div>
-                      </div>
+                        suggestion={sug}
+                        onConfirmSuggestion={onConfirmSuggestion}
+                        onRejectSuggestion={onRejectSuggestion}
+                        onReclassifySystemItems={(ids, cat) => {
+                          if (onReclassifySystemItems) {
+                            onReclassifySystemItems(ids, cat);
+                          } else if (onReclassifySystemItem) {
+                            ids.forEach((id) => onReclassifySystemItem(id, cat));
+                          }
+                        }}
+                        onInspectOperation={(item) =>
+                          setInspectedOp({ item, paired: pairedByItemId.get(item.id) || [] })
+                        }
+                      />
                     ))}
                   </div>
                 )}
@@ -631,6 +589,7 @@ export function CashGeneralDiffModal({
         operationItem={inspectedOp?.item || null}
         pairedItems={inspectedOp?.paired || []}
         result={result}
+        onReclassifySystemItem={onReclassifySystemItem}
         onClose={() => setInspectedOp(null)}
       />
     </div>

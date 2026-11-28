@@ -2,7 +2,11 @@
  * Formatadores puros para exportação executiva da Conferência de Caixa:
  * normalização de telefone WhatsApp BR, resumo textual WhatsApp e relatório HTML A4 imprimível.
  */
-import { formatDateBr } from './cashReconciliationServiceHelper.mjs';
+import {
+  formatDateBr,
+  parseForcedCashMetaFromSession,
+  stripForcedCashMarkerTag
+} from './cashReconciliationServiceHelper.mjs';
 
 export const CASH_WHATSAPP_RULE_PATTERN = 'whatsapp_notify:phone';
 
@@ -257,7 +261,16 @@ function resolveExportContext({ result = null, session = null, storeName = '', m
     if (safeInt(cb.c6PayCardCents, 0) > 0) synthCards.push({ key: 'c6pay', label: 'C6 Pay', count: 0, grossCents: safeInt(cb.c6PayCardCents, 0), feeCents: 0, netCents: safeInt(cb.c6PayCardCents, 0) });
     cardsByAcquirer = synthCards;
   }
-  const notes = String(inputs.notes || sess?.cash_notes || '').trim();
+  const forcedMeta = res.isForcedBalanced
+    ? {
+        isForced: true,
+        rawScore: Number(res.rawHealthScore ?? res.healthBreakdown?.rawHealthScore ?? 0),
+        diffCents: safeInt(res.diffTotalCents, 0),
+        reason: String(res.forcedBalanced?.reason || '').trim()
+      }
+    : parseForcedCashMetaFromSession(sess || {}, inputs);
+
+  const notes = stripForcedCashMarkerTag(inputs.notes || sess?.cash_notes || '');
 
   const getMirrorRow = (key) =>
     mirrorRows.find((r) => r && r.key === key) || {
@@ -294,6 +307,9 @@ function resolveExportContext({ result = null, session = null, storeName = '', m
     statusCode,
     statusInfo,
     healthScore,
+    isForcedBalanced: Boolean(forcedMeta?.isForced),
+    rawHealthScoreBeforeForce: forcedMeta?.rawScore ?? null,
+    forcedReason: forcedMeta?.reason || '',
     systemTotalCents,
     realTotalCents,
     diffTotalCents,
@@ -356,7 +372,12 @@ export function buildCashWhatsappSummaryMessage(params = {}) {
     `📊 *FECHAMENTO DE CAIXA — ${ctx.storeName}*`,
     `📅 Data: *${ctx.dateBr}* | 🕒 Turno: ${ctx.shiftLabel}`,
     `👤 Operador(a): ${ctx.operatorName}${ctx.isClosed ? ' _(Fechado)_' : ''}`,
-    `${ctx.statusInfo.emoji} Veredito: *${ctx.statusInfo.label}* | Saúde: *${ctx.healthScore}%*`,
+    `${ctx.statusInfo.emoji} Veredito: *${ctx.statusInfo.label}* | Saúde: *${ctx.healthScore}%${ctx.isForcedBalanced ? ' (FORÇADO ⚡)' : ''}*`,
+    ...(ctx.isForcedBalanced
+      ? [
+          `⚠️ _Caixa forçado a 100%${ctx.rawHealthScoreBeforeForce !== null ? ` (Saúde técnica real: ${ctx.rawHealthScoreBeforeForce}%)` : ''} • Diferença mantida: *${formatSignedCentsBr(ctx.diffTotalCents)}*_${ctx.forcedReason ? `\n  ↳ Motivo: ${ctx.forcedReason}` : ''}`
+        ]
+      : []),
     '',
     '💰 *RESUMO GERAL (PDV × REAL)*',
     `• Sistema (PDV): ${formatCentsBr(ctx.systemTotalCents)}`,
@@ -829,7 +850,16 @@ export function buildCashPdfReportHtml(params = {}) {
       </div>
       <div class="status-box">
         <span class="badge ${renderBadgeClass(ctx.statusInfo.tone)}">${escapeHtml(ctx.statusInfo.label)}</span>
-        <div class="health">Saúde do Caixa: ${ctx.healthScore}%</div>
+        <div class="health">
+          Saúde do Caixa: ${ctx.healthScore}%${ctx.isForcedBalanced ? ' (FORÇADO)' : ''}
+        </div>
+        ${
+          ctx.isForcedBalanced
+            ? `<div class="row-note" style="color:#b45309;font-weight:700;margin-top:2px;">
+                Forçado a 100%${ctx.rawHealthScoreBeforeForce !== null ? ` • Técnica real: ${ctx.rawHealthScoreBeforeForce}%` : ''}${ctx.forcedReason ? ` • ${escapeHtml(ctx.forcedReason)}` : ''}
+              </div>`
+            : ''
+        }
       </div>
     </header>
 

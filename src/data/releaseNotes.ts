@@ -712,6 +712,97 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.5.0',
+    date: '2026-11-27',
+    summary: 'Conferência de Caixa Turbinada: Botão Saúde do Caixa Clicável (Roteiro p/ 100% + Batimento Rápido + Caixas Forçados Pulsantes), Reclassificação Dinheiro → Pendente, Máscara BRL Automática e Comparativo de Economia entre Maquininhas',
+    notes: [
+      {
+        id: 'feat-cash-health-roadmap-and-forced-100-850',
+        category: 'features',
+        title: 'Card "Saúde do Caixa" Clicável (Roteiro até 100% + Batimento Rápido + Aviso Pulsante p/ Forçados)',
+        description: 'Clicar em Saúde do Caixa abre agora o assistente completo para zerar pendências: decompõe a pontuação perdida, traz a nova mesa "Batimento Rápido" focada na Sobra/Falta (com pares candidatos, vinculação Δ em 1 clique e mesa lado a lado embutida) e permite marcar fechamentos auditados como "Forçado a 100%" com cor e aviso pulsante âmbar em toda a tela, histórico, dashboard, WhatsApp e PDF — sem apagar o valor real da sobra ou falta.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência de Caixa • Saúde 100% & Batimento Rápido',
+          purpose: 'Mostrar exatamente tudo o que falta resolver para atingir 100% na Conferência de Caixa, acelerar o batimento entre vendas PDV e sobras bancárias pela diferença real (sobra/falta) e sinalizar de forma inconfundível com aviso pulsante qualquer caixa homologado manualmente como 100% Forçado.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Carregue os arquivos do dia ou abra um fechamento no workspace',
+            '3. No painel superior direito do resumo, clique diretamente no card "Saúde do Caixa (%)"',
+            '4. Navegue pelas abas "Roteiro para 100%", "Batimento Rápido" ou use o bloco inferior "Forçar Caixa a 100%" informando o motivo'
+          ],
+          howToTest: [
+            '1. Abra um fechamento com itens pendentes (ex.: 25/11 com Saúde 73% e Sobra +R$ 9,03) e clique no card "Saúde do Caixa".',
+            '2. Na aba "Batimento Rápido", teste confirmar um par candidato ou selecionar itens PDV × Banco vendo o score subir em tempo real.',
+            '3. No bloco inferior do Roteiro, escolha um motivo e clique em "Forçar Caixa a 100%" para ver o selo pulsante "FORÇADO A 100%" preservando "+R$ 9,03" no topo, histórico e PDF.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência de Caixa (/conferencia-caixa) ➔ Painel Superior de Saúde',
+            contextElements: ['📊 Total Sistema (PDV)', '✅ Total Real Apurado', '⚖️ Diferença Geral', '⚡ 100% Forçado (Pulsante)'],
+            targetButtonLabel: '👆 Clique Aqui: Card Saúde do Caixa (% / Resolver ➔ 100%)',
+            targetButtonPosition: 'Canto superior direito do card principal de Veredito na Conferência de Caixa',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Conferência de Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'feat-cash-delivery-reclassify-high-sim-notes-850',
+        category: 'features',
+        title: 'Reclassificação Dinheiro → Pendente, Sugestões Alta Semelhança e Anotações na Gaveta',
+        description: 'Detecta automaticamente pedidos Delivery em Dinheiro compatíveis com falta física na gaveta (sugerindo mudança rápida para Nota Pendente com 1 clique), introduz sugestões digitais de alta semelhança (≥ 80% até R$ 25,00, ex.: Delivery com taxa à parte ou PIX aproximado) e libera anotações diretas em cada linha de Saídas Pagamentos no detalhamento da gaveta.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência de Caixa • Reclassificação PDV & Gaveta Auditável',
+          purpose: 'Corrigir rapidamente erros comuns de caixa — como Delivery baixado em Dinheiro quando deveria ser Nota Pendente ou pedido com taxa de entrega paga à parte — e permitir justificar despesas da gaveta (ex.: Ref. 64,74 -> coxasobrecoxa) sem depender de planilhas externas.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Abra a aba "Sugestões", "Pedidos PDV" ou clique em qualquer valor de operação PDV para abrir os detalhes e clicar em "Mudar p/ Pendente / PIX / Cartão"',
+            '3. Na coluna esquerda "Fechamento Físico da Gaveta", clique em "Saídas Pagamentos (Vales/Contas)" e use o botão "Anotar" em qualquer item'
+          ],
+          howToTest: [
+            '1. Clique em qualquer valor de pedido do PDV para visualizar seus itens e alternar a forma de pagamento (Dinheiro ↔ Pendente).',
+            '2. Clique em "Saídas Pagamentos" na gaveta e salve uma observação de teste em uma baixa do TXT.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência de Caixa ➔ Espelho, Sugestões & Saídas da Gaveta',
+            contextElements: ['💵 Dinheiro Contado R$ 0,00 (Só Sangria)', '🍔 Pedidos PDV (Filtros)', '🔄 Mudar p/ Pendente', '📝 Anotar Saída TXT'],
+            targetButtonLabel: '👆 Clique Aqui: Mudar p/ Pendente ou Anotar Saída',
+            targetButtonPosition: 'Cards de Sugestões / Detalhe do Pedido / Modal de Saídas da Gaveta',
+            visualPreviewVariant: 'hub-quick-replies'
+          },
+          quickAction: {
+            label: 'Abrir Conferência de Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'imp-cash-acquirer-savings-mask-and-filters-850',
+        category: 'improvements',
+        title: 'Comparativo de Economia entre Maquininhas (Rede × C6), Máscara BRL Automática, Aba Pedidos PDV e Raio-X Auditável',
+        description: 'Todos os campos monetários do sistema passaram a formatar centavos automaticamente ao digitar (estilo ATM, sem ponto/vírgula). Na Conferência de Caixa: preenchimento padrão "Só Sangria (R$ 0,00)" e "Pendentes Real = Sistema", aba exclusiva "Pedidos PDV" com filtros por origem (Delivery, Mesa, Balcão, Totem, Pendente), comparativo real de taxas MDR e economia mensal potencial entre adquirentes, detalhamento expandido de Cancelados / Descontos / Consumo Interno / Taxas Delivery + Casa e gráfico histórico restrito ao Dashboard.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: 'fix-cash-false-drawer-zero-and-pending-reclass-warnings-850',
+        category: 'fixes',
+        title: 'Eliminação de Falsos Alertas na Gaveta com Sangria e em Pendentes Pós-Ajuste Manual',
+        description: 'Corrigido o falso aviso "Saldo em dinheiro na gaveta zerado" quando a Sangria já cobria o fechamento TXT restando apenas diferença mínima, além de impedir o falso erro vermelho de "Divergência em Notas Pendentes" após o operador corrigir manualmente um pedido de Dinheiro para Pendente.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.9',
     date: '2026-11-27',
     summary: 'Switch ON/OFF Instantâneo nos Bots e no Flow Builder com Garantia de Parada/Ativação, Workspace SaaS Limpo com Máxima Área de Canvas e Exclusão em Cascata de Fluxos',

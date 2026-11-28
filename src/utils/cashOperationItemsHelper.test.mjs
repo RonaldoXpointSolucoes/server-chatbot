@@ -9,7 +9,9 @@ import {
   linkSoldItemsToPdvOperations,
   buildAuditInsights,
   annotateMissingItemsWithOperationalHints,
-  linkPendingDebtorsToSystemItems
+  linkPendingDebtorsToSystemItems,
+  buildPdvOrdersCatalog,
+  filterPdvOrdersCatalog
 } from './cashOperationItemsHelper.mjs';
 
 test('formatSoldProductName parses pipe-delimited DataDivas combos into readable names', () => {
@@ -269,4 +271,163 @@ test('linkPendingDebtorsToSystemItems associa nomes inequívocos (inclusive repe
 
   // Lançamentos não pendentes não são vinculados
   assert.equal(byId.p_pix, undefined);
+});
+
+test('normalizeOrderModule, buildPdvOrdersCatalog e filterPdvOrdersCatalog organizam Delivery, Mesa, Balcão, Totem e Pendente com filtros', () => {
+  assert.equal(normalizeOrderModule('TOTEM'), 'TOTEM');
+  assert.equal(normalizeOrderModule('BALCAO', 'AUTOATENDIMENTO TOTEM'), 'TOTEM');
+  assert.equal(normalizeOrderModule('AUTOATENDIMENTO'), 'TOTEM');
+  assert.equal(normalizeOrderModule('BALCAO', 'RETIRADA BALCAO'), 'BALCAO');
+  assert.equal(normalizeOrderModule('DELIVERY', 'IFOOD'), 'DELIVERY');
+
+  const mockResult = {
+    systemItems: [
+      {
+        id: 'sys_del_9',
+        category: 'cartao',
+        amountCents: 3800,
+        dateStr: '2026-11-25',
+        timeStr: '13:16:47',
+        secondsOfDay: 13 * 3600 + 16 * 60 + 47,
+        referenceCode: '9',
+        description: 'DELIVERY 9 • DEBITO',
+        operatorName: 'MARCELA',
+        metadata: {
+          modulo: 'DELIVERY',
+          origem: 'DELIVERY',
+          formaPagto: 'CARTAO',
+          administradora: 'DEBITO',
+          orderDetail: {
+            scopeKey: 'DELIVERY#9',
+            orderNumber: '9',
+            module: 'DELIVERY',
+            waiters: [],
+            operators: ['MARCELA'],
+            splitCount: 1,
+            totalPaidCents: 3800,
+            itemsSubtotalCents: 3300,
+            serviceFeeCents: 500,
+            itemDiscountsCents: 0,
+            hasFeeRemoval: false,
+            hasDiscount: false,
+            items: [{ displayName: 'OMELETE ESPECIAL', comboParts: [], qty: 1, unitCents: 3300, totalCents: 3300 }]
+          }
+        }
+      },
+      {
+        id: 'sys_mesa_15_a',
+        category: 'pix',
+        amountCents: 3000,
+        dateStr: '2026-11-25',
+        timeStr: '13:38:00',
+        secondsOfDay: 13 * 3600 + 38 * 60,
+        referenceCode: '15',
+        description: 'MESA 015 • PIX',
+        operatorName: 'MARCELA',
+        metadata: { modulo: 'MESA', origem: 'MESA', formaPagto: 'PIX', administradora: 'PIX' }
+      },
+      {
+        id: 'sys_mesa_15_b',
+        category: 'cartao',
+        amountCents: 2000,
+        dateStr: '2026-11-25',
+        timeStr: '13:38:20',
+        secondsOfDay: 13 * 3600 + 38 * 60 + 20,
+        referenceCode: '15',
+        description: 'MESA 015 • DEBITO',
+        operatorName: 'MARCELA',
+        metadata: { modulo: 'MESA', origem: 'MESA', formaPagto: 'CARTAO', administradora: 'DEBITO' }
+      },
+      {
+        id: 'sys_balcao_sem_num_1',
+        category: 'dinheiro',
+        amountCents: 1500,
+        dateStr: '2026-11-25',
+        timeStr: '10:05:00',
+        secondsOfDay: 10 * 3600 + 5 * 60,
+        referenceCode: '',
+        description: 'BALCAO • DINHEIRO',
+        operatorName: 'EDILZA',
+        metadata: { modulo: 'BALCAO', origem: 'BALCAO', formaPagto: 'DINHEIRO', administradora: 'DINHEIRO' }
+      },
+      {
+        id: 'sys_balcao_sem_num_2',
+        category: 'dinheiro',
+        amountCents: 1800,
+        dateStr: '2026-11-25',
+        timeStr: '10:15:00',
+        secondsOfDay: 10 * 3600 + 15 * 60,
+        referenceCode: '',
+        description: 'BALCAO • DINHEIRO',
+        operatorName: 'EDILZA',
+        metadata: { modulo: 'BALCAO', origem: 'BALCAO', formaPagto: 'DINHEIRO', administradora: 'DINHEIRO' }
+      },
+      {
+        id: 'sys_totem_41',
+        category: 'cartao',
+        amountCents: 4400,
+        dateStr: '2026-11-25',
+        timeStr: '19:40:00',
+        secondsOfDay: 19 * 3600 + 40 * 60,
+        referenceCode: '41',
+        description: 'TOTEM 41 • CREDITO',
+        operatorName: 'TOTEM 01',
+        terminalName: 'TOTEM 01',
+        metadata: { modulo: 'TOTEM', origem: 'TOTEM', formaPagto: 'CARTAO', administradora: 'CREDITO' }
+      },
+      {
+        id: 'sys_pend_7',
+        category: 'pendente',
+        amountCents: 8900,
+        dateStr: '2026-11-25',
+        timeStr: '20:10:00',
+        secondsOfDay: 20 * 3600 + 10 * 60,
+        referenceCode: '007',
+        description: 'MESA 007 • NOTA PENDENTE',
+        operatorName: 'MARCELA',
+        metadata: { modulo: 'MESA', origem: 'MESA', formaPagto: 'NOTA PENDENTE', debtorName: 'CLEITON FERREIRA' }
+      }
+    ],
+    matchedPairs: [
+      {
+        id: 'match_totem',
+        systemItems: [{ id: 'sys_totem_41', amountCents: 4400 }],
+        realItems: [{ id: 'real_totem_41', side: 'real', source: 'rede', amountCents: 4400 }]
+      }
+    ],
+    suggestions: [
+      { id: 'sug_del', systemItems: [{ id: 'sys_del_9' }], realItems: [{ id: 'real_del_9', side: 'real' }] }
+    ],
+    missingInBank: [{ id: 'sys_mesa_15_b', amountCents: 2000 }],
+    auditInsights: { cancelledDetails: [], feeRemovals: [], discountDetails: [], reopenedTables: [] }
+  };
+
+  const catalog = buildPdvOrdersCatalog(mockResult);
+  // Mesa 15 com 2 pagamentos no mesmo turno vira 1 pedido; Balcão sem número vira 2 pedidos separados
+  assert.equal(catalog.orders.length, 6);
+  assert.equal(catalog.moduleSummaries.DELIVERY.count, 1);
+  assert.equal(catalog.moduleSummaries.MESA.count, 2);
+  assert.equal(catalog.moduleSummaries.BALCAO.count, 2);
+  assert.equal(catalog.moduleSummaries.TOTEM.count, 1);
+  assert.equal(catalog.moduleSummaries.PENDENTE.count, 1);
+
+  const mesa15 = catalog.orders.find((o) => o.orderNumber === '15');
+  assert.equal(mesa15?.totalCents, 5000);
+  assert.equal(mesa15?.reconcilStatus, 'em_falta');
+
+  const del9 = catalog.orders.find((o) => o.moduleKey === 'DELIVERY');
+  assert.equal(del9?.reconcilStatus, 'sugestao');
+  assert.equal(del9?.itemsCount, 1);
+
+  const totem41 = catalog.orders.find((o) => o.moduleKey === 'TOTEM');
+  assert.equal(totem41?.reconcilStatus, 'conciliado');
+  assert.equal(totem41?.pairedItems.length, 1);
+
+  // Filtros
+  assert.equal(filterPdvOrdersCatalog(catalog.orders, { moduleFilter: 'TOTEM' }).length, 1);
+  assert.equal(filterPdvOrdersCatalog(catalog.orders, { moduleFilter: 'PENDENTE' }).length, 1);
+  assert.equal(filterPdvOrdersCatalog(catalog.orders, { query: 'omelete' }).length, 1);
+  assert.equal(filterPdvOrdersCatalog(catalog.orders, { query: 'cleiton' }).length, 1);
+  assert.equal(filterPdvOrdersCatalog(catalog.orders, { statusFilter: 'em_falta' }).length, 1);
+  assert.equal(filterPdvOrdersCatalog(catalog.orders, { paymentFilter: 'dinheiro' }).length, 2);
 });

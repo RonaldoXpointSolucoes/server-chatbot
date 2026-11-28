@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { BrlCurrencyInput } from '../components/ui/BrlCurrencyInput';
 import { format } from 'date-fns';
 import { 
   ClipboardList, 
@@ -2728,11 +2729,11 @@ export default function CrmKanban() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Faturamento Estimado</label>
-                    <input 
-                      type="number" 
+                    <BrlCurrencyInput
                       placeholder="R$ 0,00"
-                      value={leadForm.estimated_revenue || ''}
-                      onChange={e => setLeadForm({ ...leadForm, estimated_revenue: Number(e.target.value) })}
+                      allowEmptyZero
+                      valueReais={leadForm.estimated_revenue}
+                      onChangeReais={val => setLeadForm({ ...leadForm, estimated_revenue: val })}
                       className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                     />
                   </div>
@@ -3165,10 +3166,9 @@ export default function CrmKanban() {
                         <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Faturamento Estimado (R$)</label>
                         <div className="relative">
                           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">R$</span>
-                          <input 
-                            type="number" 
-                            value={selectedLead.estimated_revenue}
-                            onChange={e => void handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) }, { debounceMs: 450, editedField: 'estimated_revenue' })}
+                          <BrlCurrencyInput
+                            valueReais={selectedLead.estimated_revenue}
+                            onChangeReais={val => void handleSaveLeadEdits({ ...selectedLead, estimated_revenue: val }, { debounceMs: 450, editedField: 'estimated_revenue' })}
                             className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-extrabold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                           />
                         </div>

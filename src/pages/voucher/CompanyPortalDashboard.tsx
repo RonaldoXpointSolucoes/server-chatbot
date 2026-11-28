@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BrlCurrencyInput } from '../../components/ui/BrlCurrencyInput';
+import { parseFormattedBrlToReais } from '../../utils/currencyInputMask.mjs';
 import {
   Ticket,
   Users,
@@ -260,7 +262,7 @@ export default function CompanyPortalDashboard() {
   const handleIssueSingle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!portalToken) return;
-    const valorNum = parseFloat(issueValor.replace(',', '.'));
+    const valorNum = parseFormattedBrlToReais(issueValor);
     if (!issueNome.trim()) {
       showToast('error', 'Informe o nome do colaborador / beneficiário.');
       return;
@@ -314,7 +316,7 @@ export default function CompanyPortalDashboard() {
     e.preventDefault();
     if (!portalToken || selectedColabs.length === 0) return;
 
-    const valorUnit = parseFloat(batchValor.replace(',', '.'));
+    const valorUnit = parseFormattedBrlToReais(batchValor);
     if (isNaN(valorUnit) || valorUnit <= 0) {
       showToast('error', 'Informe um valor unitário válido.');
       return;
@@ -456,7 +458,7 @@ export default function CompanyPortalDashboard() {
   };
 
   // Request Discounted Credit Purchase Order
-  const creditNumeric = Math.max(parseFloat(buyCreditAmount.replace(',', '.')) || 0, 0);
+  const creditNumeric = Math.max(parseFormattedBrlToReais(buyCreditAmount) || 0, 0);
   const discountPct = Number(empresa?.desconto_compra_percent || 0);
   const discountMoney = Number((creditNumeric * (discountPct / 100)).toFixed(2));
   const netToPay = Number((creditNumeric - discountMoney).toFixed(2));
@@ -1097,12 +1099,9 @@ export default function CompanyPortalDashboard() {
                         <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
                           Valor em Créditos (R$)
                         </label>
-                        <input
-                          type="number"
-                          min="10"
-                          step="10"
-                          value={buyCreditAmount}
-                          onChange={e => setBuyCreditAmount(e.target.value)}
+                        <BrlCurrencyInput
+                          valueText={buyCreditAmount}
+                          onChangeText={val => setBuyCreditAmount(val)}
                           className="w-full min-h-[48px] px-4 rounded-2xl bg-slate-950/80 border border-slate-700 text-white font-bold text-base outline-none focus:border-emerald-500"
                         />
                       </div>
@@ -1324,13 +1323,10 @@ export default function CompanyPortalDashboard() {
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Valor (R$) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1"
+                  <BrlCurrencyInput
                     required
-                    value={issueValor}
-                    onChange={e => setIssueValor(e.target.value)}
+                    valueText={issueValor}
+                    onChangeText={val => setIssueValor(val)}
                     className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm font-bold text-emerald-400 outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1402,12 +1398,9 @@ export default function CompanyPortalDashboard() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Valor Unitário (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    value={batchValor}
-                    onChange={e => setBatchValor(e.target.value)}
+                  <BrlCurrencyInput
+                    valueText={batchValor}
+                    onChangeText={val => setBatchValor(val)}
                     className="w-full min-h-[46px] px-3.5 rounded-2xl bg-slate-950 border border-slate-700 text-white font-bold"
                   />
                 </div>
@@ -1441,7 +1434,7 @@ export default function CompanyPortalDashboard() {
               <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs flex justify-between">
                 <span className="text-slate-400">Débito total do lote:</span>
                 <strong className="text-emerald-400 font-black">
-                  {formatBRL((parseFloat(batchValor) || 0) * selectedColabs.length)}
+                  {formatBRL(parseFormattedBrlToReais(batchValor) * selectedColabs.length)}
                 </strong>
               </div>
               <button

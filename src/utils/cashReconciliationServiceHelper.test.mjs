@@ -832,3 +832,460 @@ test('buildLinkableSystemPool exclui NOTA PENDENTE (fiado ja resolvido) mantendo
   const extraCardSameAsPending = { id: 'e_30', source: 'c6pay', category: 'cartao', amountCents: 3000, secondsOfDay: 49100 };
   assert.equal(findBestCandidateForSobra(extraCardSameAsPending, pool), null);
 });
+
+test('buildDefaultManualInputsPatch preenche Só Sangria (0,00) e Pendentes REAL=SISTEMA por padrão sem sobrescrever edições manuais ou fechamentos antigos', async () => {
+  const { buildDefaultManualInputsPatch } = await import('./cashReconciliationServiceHelper.mjs');
+  const mockResult = {
+    mirrorRows: [
+      { key: 'saldo_dinheiro', systemCents: 21583, realCents: 21585 },
+      { key: 'pendentes', systemCents: 42328, realCents: 0 }
+    ]
+  };
+
+  // 1. Novo caixa aberto: preenche 0,00 + Só Sangria e Pendentes REAL = SISTEMA
+  const patchInitial = buildDefaultManualInputsPatch({}, mockResult, { isClosedSession: false });
+  assert.deepEqual(patchInitial, {
+    cashCountedCents: 0,
+    cashDrawerZeroConfirmed: true,
+    categoryRealOverrides: { pendentes: 42328 },
+    pendentesAutoSynced: true
+  });
+
+  // 2. Upload incremental muda sistema de Pendentes antes de edição manual -> acompanha novo total
+  const patchIncremental = buildDefaultManualInputsPatch(
+    { ...patchInitial },
+    { mirrorRows: [{ key: 'pendentes', systemCents: 51000 }] },
+    { isClosedSession: false }
+  );
+  assert.equal(patchIncremental?.categoryRealOverrides?.pendentes, 51000);
+
+  // 3. Sem alterações quando já está sincronizado
+  assert.equal(
+    buildDefaultManualInputsPatch(patchInitial, mockResult, { isClosedSession: false }),
+    null
+  );
+
+  // 4. Se usuário editou manualmente Dinheiro (ex.: apagou ou digitou valor) e Pendentes, NÃO sobrescreve mais
+  const userEdited = {
+    cashCountedCents: 25727,
+    cashDrawerZeroConfirmed: false,
+    categoryRealOverrides: { pendentes: 30000 },
+    pendentesTouched: true,
+    pendentesAutoSynced: false
+  };
+  assert.equal(
+    buildDefaultManualInputsPatch(userEdited, mockResult, { isClosedSession: false }),
+    null
+  );
+
+  // 5. Se usuário limpou o dinheiro manualmente (null + cashDrawerZeroConfirmed: false), respeita
+  assert.equal(
+    buildDefaultManualInputsPatch(
+      { cashCountedCents: null, cashDrawerZeroConfirmed: false, categoryRealOverrides: { pendentes: 42328 }, pendentesAutoSynced: true },
+      mockResult,
+      { isClosedSession: false }
+    ),
+    null
+  );
+
+  // 6. Rascunho antigo já salvo com override de Pendentes explícito sem flags não é alterado; nem sessão fechada
+  assert.equal(
+    buildDefaultManualInputsPatch(
+      { cashCountedCents: 0, cashDrawerZeroConfirmed: true, categoryRealOverrides: { pendentes: 40550 } },
+      mockResult,
+      { isClosedSession: false }
+    ),
+    null
+  );
+  assert.equal(
+    buildDefaultManualInputsPatch({}, mockResult, { isClosedSession: true }),
+    null
+  );
+});
+
+test('buildPairedItemsByIdMap mapeia itens de sistema e banco vinculados para consulta rápida no modal de detalhes', async () => {
+  const { buildPairedItemsByIdMap } = await import('./cashReconciliationServiceHelper.mjs');
+  const sysItem = { id: 'sys_1', side: 'system', amountCents: 3800 };
+  const realItem = { id: 'real_1', side: 'real', amountCents: 3800 };
+  const map = buildPairedItemsByIdMap([{ id: 'm1', systemItems: [sysItem], realItems: [realItem] }]);
+
+  assert.deepEqual(map.get('sys_1'), [realItem]);
+  assert.deepEqual(map.get('real_1'), [sysItem]);
+  assert.equal(map.get('inexistente'), undefined);
+});
+
+test('buildMirrorRowDetails inclui sugestões cash_to_pending tanto em Saldo em Dinheiro quanto em Pendentes', async () => {
+  const { buildMirrorRowDetails } = await import('./cashReconciliationServiceHelper.mjs');
+  const sug = {
+    id: 'sug_cash_to_pend_1',
+    reasonType: 'cash_to_pending',
+    suggestedTargetCategory: 'pendente',
+    systemItems: [{ id: 's1', category: 'dinheiro', amountCents: 9709 }],
+    realItems: []
+  };
+  const mockResult = { matchedPairs: [], suggestions: [sug], missingInBank: [], extraInBank: [], systemItems: [] };
+  assert.equal(buildMirrorRowDetails(mockResult, 'saldo_dinheiro').suggestions.length, 1);
+  assert.equal(buildMirrorRowDetails(mockResult, 'pendentes').suggestions.length, 1);
+});
+
+test('buildAcquirerFeeComparison calcula diferença entre maquininhas e economia usando a opção mais econômica por bandeira/modalidade e média global', async () => {
+  const { buildAcquirerFeeComparison, buildHealthMetricDetail } = await import('./cashReconciliationServiceHelper.mjs');
+  const realItems = [
+    // Crédito Mastercard na Rede (3,25%) vs C6 Pay (2,79%) -> C6 Pay é mais econômica!
+    {
+      id: 'r_rede_mc',
+      source: 'rede',
+      category: 'cartao',
+      subCategory: 'credito',
+      amountCents: 20000, // R$ 200,00
+      feeCents: 650, // 3,25%
+      netAmountCents: 19350,
+      dateStr: '2026-11-25',
+      timeStr: '10:00:00',
+      description: 'Rede CREDITO Mastercard',
+      metadata: { bandeira: 'Mastercard' }
+    },
+    {
+      id: 'r_c6_mc',
+      source: 'c6pay',
+      category: 'cartao',
+      subCategory: 'credito',
+      amountCents: 20000, // R$ 200,00
+      feeCents: 558, // 2,79%
+      netAmountCents: 19442,
+      dateStr: '2026-11-25',
+      timeStr: '12:00:00',
+      description: 'C6 Pay CREDITO MASTERCARD',
+      metadata: { bandeira: 'MASTERCARD' }
+    },
+    // Débito Visa na Rede (1,00%) vs C6 Pay (1,40%) -> Rede é mais econômica no Débito Visa!
+    {
+      id: 'r_rede_deb',
+      source: 'rede',
+      category: 'cartao',
+      subCategory: 'debito',
+      amountCents: 10000, // R$ 100,00
+      feeCents: 100, // 1,00%
+      netAmountCents: 9900,
+      dateStr: '2026-11-25',
+      timeStr: '13:00:00',
+      description: 'Rede DEBITO Visa',
+      metadata: { bandeira: 'Visa' }
+    },
+    {
+      id: 'r_c6_deb',
+      source: 'c6pay',
+      category: 'cartao',
+      subCategory: 'debito',
+      amountCents: 10000, // R$ 100,00
+      feeCents: 140, // 1,40%
+      netAmountCents: 9860,
+      dateStr: '2026-11-25',
+      timeStr: '14:00:00',
+      description: 'C6 Pay DEBITO VISA',
+      metadata: { bandeira: 'VISA' }
+    }
+  ];
+
+  const comp = buildAcquirerFeeComparison(realItems);
+  assert.equal(comp.hasMultipleSources, true);
+  assert.equal(comp.sources.length, 2);
+  // Global: C6 Pay teve 558+140 = 698 em 30000 (2,33%) vs Rede 650+100 = 750 em 30000 (2,50%)
+  assert.equal(comp.cheapestSource.source, 'C6PAY');
+  assert.equal(comp.mostExpensiveSource.source, 'REDE');
+  assert.ok(comp.rateSpreadPctPoints > 0.15);
+  // Economia ótima por bandeira/modalidade: (650 - 558) no Crédito MC = 92 + (140 - 100) no Débito Visa = 40 -> 132 cents (R$ 1,32)
+  assert.equal(comp.optimalRoutingSavingsCents, 132);
+  assert.equal(comp.headlineSavingsCents, 132);
+  assert.equal(comp.monthlyProjectedSavingsCents, 132 * 30);
+  assert.equal(comp.profileComparisons.length, 2);
+
+  const feesDetail = buildHealthMetricDetail(
+    { realItems, financialMetrics: { totalMdrFeeCents: 1448, totalNetDigitalCents: 58552 } },
+    'fees'
+  );
+  assert.equal(feesDetail.comparison.optimalRoutingSavingsCents, 132);
+  const netDetail = buildHealthMetricDetail(
+    { realItems, financialMetrics: { totalMdrFeeCents: 1448, totalNetDigitalCents: 58552 } },
+    'net_digital'
+  );
+  assert.equal(netDetail.comparison.optimalRoutingSavingsCents, 132);
+});
+
+test('buildHealthMetricDetail enriquece cancelamentos, descontos + consumo interno e taxas delivery + casa com agrupamentos e estimativa de perda', async () => {
+  const { buildHealthMetricDetail } = await import('./cashReconciliationServiceHelper.mjs');
+  const mockRichResult = {
+    systemTotalCents: 500000,
+    systemItems: [
+      {
+        id: 'sys_ci_1',
+        side: 'system',
+        category: 'outros',
+        subCategory: 'consumo_interno',
+        amountCents: 4200,
+        timeStr: '15:10:00',
+        referenceCode: '99',
+        description: 'MESA 099 • CONSUMO INTERNO',
+        operatorName: 'CAIXA',
+        metadata: {
+          formaPagto: 'CONSUMO INTERNO',
+          orderDetail: {
+            items: [
+              { qty: 1, displayName: 'X-Burguer Plus', totalCents: 3200 },
+              { qty: 1, displayName: 'Refrigerante Lata', totalCents: 1000 }
+            ]
+          }
+        }
+      },
+      {
+        id: 'sys_deliv_1',
+        side: 'system',
+        category: 'pix',
+        subCategory: 'pix_pdv',
+        amountCents: 5700,
+        timeStr: '20:15:00',
+        referenceCode: '42',
+        description: 'DELIVERY 42 • PIX',
+        operatorName: 'MARCELA',
+        metadata: {
+          modulo: 'DELIVERY',
+          orderDetail: {
+            module: 'DELIVERY',
+            orderNumber: '42',
+            itemsSubtotalCents: 5000,
+            totalPaidCents: 5700,
+            serviceFeeCents: 0,
+            items: [{ qty: 1, displayName: 'Combo Duplo', totalCents: 5000 }]
+          }
+        }
+      },
+      {
+        id: 'sys_mesa_1',
+        side: 'system',
+        category: 'cartao',
+        subCategory: 'credito',
+        amountCents: 11000,
+        timeStr: '21:00:00',
+        referenceCode: '15',
+        description: 'MESA 015 • CREDITO',
+        operatorName: 'MARCELA',
+        metadata: {
+          modulo: 'MESA',
+          orderDetail: {
+            module: 'MESA',
+            orderNumber: '15',
+            itemsSubtotalCents: 10000,
+            totalPaidCents: 11000,
+            serviceFeeCents: 1000,
+            waiters: ['KARINA'],
+            items: [{ qty: 2, displayName: 'Parmegiana', totalCents: 10000 }]
+          }
+        }
+      }
+    ],
+    mirrorRows: [
+      { key: 'pix', systemCents: 200000 },
+      { key: 'cartao', systemCents: 200000 },
+      { key: 'pendentes', systemCents: 50000 }
+    ],
+    cashDrawerSummary: { vendaDinheiroCents: 50000 },
+    auditInsights: {
+      internalConsumptionCostCents: 1850,
+      cancelledDetails: [
+        { product: 'LIMONADA SUICA', qty: 1, totalCents: 1500, table: '009', timeStr: '12:37:53', waiter: 'KARINA', operator: '-', reason: 'LANÇAMENTO ERRADO', reasonDetails: 'Era suco de limão', group: 'BEBIDAS' },
+        { product: 'LIMONADA SUICA', qty: 1, totalCents: 1500, table: '009', timeStr: '12:38:56', waiter: 'KARINA', operator: '-', reason: 'LANÇAMENTO ERRADO', reasonDetails: 'Era suco limão', group: 'BEBIDAS' },
+        { product: 'PARMEGIANA', qty: 2, totalCents: 10200, table: '006', timeStr: '10:26:30', waiter: 'RONALDO', operator: '-', reason: 'TESTE', reasonDetails: 'Teste com novo garçom', group: 'PRATOS' }
+      ],
+      discountDetails: [
+        { source: 'Planilha Descontos', orderNumber: '012', module: 'MESA', timeStr: '19:00:00', amountCents: 1200, reason: 'CORTESIA', employee: 'MARCELA' },
+        { source: 'Planilha Descontos', orderNumber: '018', module: 'DELIVERY', timeStr: '20:00:00', amountCents: 800, reason: 'CORTESIA', employee: 'RONALDO' }
+      ],
+      feeRemovals: [
+        { orderNumber: '021', module: 'MESA', product: 'PICANHA NA CHAPA', totalCents: 8900, timeStr: '21:10:00', waiter: 'KARINA', reason: 'Cliente pediu isenção', details: 'Sem taxa 10%', operator: 'MARCELA' }
+      ]
+    },
+    financialMetrics: {
+      cancelledCount: 3,
+      cancelledCents: 13200,
+      discountsCents: 2000,
+      internalConsumptionCents: 4200,
+      deliveryFeeCents: 700,
+      serviceFeeCents: 1000,
+      guestCount: 40,
+      averageTicketCents: 11250
+    }
+  };
+
+  const cancelled = buildHealthMetricDetail(mockRichResult, 'cancelled');
+  assert.equal(cancelled.byReason.length, 2);
+  assert.equal(cancelled.byWaiter[0].name, 'RONALDO');
+  assert.equal(cancelled.byWaiter[0].totalCents, 10200);
+  assert.ok(cancelled.impactPctOfSales > 2);
+
+  const discounts = buildHealthMetricDetail(mockRichResult, 'discounts');
+  assert.equal(discounts.byEmployee.length, 2);
+  assert.equal(discounts.byReason[0].reason, 'CORTESIA');
+  assert.equal(discounts.byReason[0].totalCents, 2000);
+  assert.equal(discounts.internalConsumptionItems.length, 1);
+  assert.equal(discounts.internalConsumptionItems[0].items.length, 2);
+
+  const fees = buildHealthMetricDetail(mockRichResult, 'delivery_house_fees');
+  assert.equal(fees.deliveryOrders.length, 1);
+  assert.equal(fees.deliveryOrders[0].inferredFeeCents, 700);
+  assert.equal(fees.serviceFeeOrders.length, 1);
+  assert.equal(fees.serviceFeeOrders[0].serviceFeeCents, 1000);
+  assert.equal(fees.estimatedLostServiceFeeCents, 890); // 10% de R$ 89,00
+});
+
+test('forced 100% persistence tag, historical detection and buildCashHealthActionPlan roadmap (73% -> 100% with +R$ 9,03)', async () => {
+  const {
+    buildSessionPersistencePayload,
+    computeHistoricalHealthStats,
+    parseForcedCashMetaFromSession,
+    stripForcedCashMarkerTag,
+    buildCashHealthActionPlan
+  } = await import('./cashReconciliationServiceHelper.mjs');
+
+  const sampleResult25 = {
+    referenceDate: '2026-11-25',
+    status: 'surplus',
+    healthScore: 100,
+    rawHealthScore: 73,
+    isForcedBalanced: true,
+    forcedBalanced: {
+      enabled: true,
+      reason: 'Sobra de R$ 9,03 mantida como saldo positivo',
+      rawHealthScoreBeforeForce: 73,
+      rawDiffCents: 903
+    },
+    healthBreakdown: {
+      rawHealthScore: 73,
+      diffPenaltyPts: 0,
+      structuralSugCount: 1,
+      structuralSugPenaltyPts: 2.5,
+      smallDiffSugCount: 1,
+      smallDiffSugPenaltyPts: 1.5,
+      missingCount: 5,
+      missingPenaltyPts: 15,
+      extraCount: 4,
+      extraPenaltyPts: 8,
+      absFocusDiffCents: 903,
+      baseVolumeCents: 530919,
+      totalPenaltyPts: 27
+    },
+    systemTotalCents: 530919,
+    realTotalCents: 531822,
+    diffTotalCents: 903,
+    mirrorRows: [
+      { key: 'saldo_dinheiro', label: 'Saldo em Dinheiro', systemCents: 33019, realCents: 33010, hasRealInput: true, diffCents: -9 },
+      { key: 'cartao', label: 'Crédito, Débito e Voucher', systemCents: 329010, realCents: 328415, hasRealInput: true, diffCents: -595 },
+      { key: 'pendentes', label: 'Pendentes', systemCents: 43338, realCents: 43338, hasRealInput: true, diffCents: 0 },
+      { key: 'pix', label: 'Pix', systemCents: 125552, realCents: 127059, hasRealInput: true, diffCents: 1507 }
+    ],
+    cashDrawerSummary: { countedCents: 0, sangriaCents: 33010, expectedAfterSangriaCents: 9 },
+    suggestions: [
+      {
+        id: 'sug_n1',
+        reasonType: 'grouped_n_to_1',
+        reasonText: 'MESA 015 + DELIVERY 9 = C6 Pay R$ 45,00',
+        amountCents: 4500,
+        systemIds: ['m_7', 'm_38'],
+        realIds: ['r_45'],
+        systemItems: [
+          { id: 'm_7', category: 'cartao', amountCents: 700, timeStr: '13:38:00', secondsOfDay: 49080, description: 'MESA 015' },
+          { id: 'm_38', category: 'cartao', amountCents: 3800, timeStr: '13:16:47', secondsOfDay: 47807, description: 'DELIVERY 9' }
+        ],
+        realItems: [{ id: 'r_45', source: 'c6pay', category: 'cartao', amountCents: 4500, timeStr: '13:37:07', secondsOfDay: 49027, description: 'C6 Pay DEBITO' }]
+      },
+      {
+        id: 'sug_sd',
+        reasonType: 'small_diff',
+        reasonText: 'PDV R$ 66,48 vs C6 Pay R$ 66,53',
+        amountCents: 6648,
+        diffCents: 5,
+        systemIds: ['m_66'],
+        realIds: ['r_66'],
+        systemItems: [{ id: 'm_66', category: 'cartao', amountCents: 6648, timeStr: '21:00:01', secondsOfDay: 75601, description: 'MESA 019' }],
+        realItems: [{ id: 'r_66', source: 'c6pay', category: 'cartao', amountCents: 6653, timeStr: '20:59:50', secondsOfDay: 75590, description: 'C6 Pay CREDITO' }]
+      }
+    ],
+    missingInBank: [
+      { id: 'm_7', category: 'cartao', amountCents: 700, timeStr: '13:38:00', secondsOfDay: 49080, description: 'MESA 015 • DEBITO' },
+      { id: 'm_38', category: 'cartao', amountCents: 3800, timeStr: '13:16:47', secondsOfDay: 47807, description: 'DELIVERY 9 • DEBITO' },
+      { id: 'm_6', category: 'cartao', amountCents: 600, timeStr: '15:54:35', secondsOfDay: 57275, description: 'MESA 030 • DEBITO' },
+      { id: 'm_66', category: 'cartao', amountCents: 6648, timeStr: '21:00:01', secondsOfDay: 75601, description: 'MESA 019 • CREDITO' },
+      { id: 'm_84', category: 'pix', amountCents: 8464, timeStr: '21:47:42', secondsOfDay: 78462, description: 'MESA 015 • PIX' }
+    ],
+    extraInBank: [
+      { id: 'r_45', source: 'c6pay', category: 'cartao', amountCents: 4500, timeStr: '13:37:07', secondsOfDay: 49027, description: 'C6 Pay DEBITO' },
+      { id: 'r_66', source: 'c6pay', category: 'cartao', amountCents: 6653, timeStr: '20:59:50', secondsOfDay: 75590, description: 'C6 Pay CREDITO' },
+      { id: 'r_74', source: 'rede', category: 'pix', amountCents: 7471, timeStr: '21:34:00', secondsOfDay: 77640, description: 'Rede PIX' },
+      { id: 'r_25', source: 'rede', category: 'pix', amountCents: 2500, timeStr: '21:39:00', secondsOfDay: 77940, description: 'Rede PIX' }
+    ],
+    periodDiagnostics: { validationWarnings: [] }
+  };
+
+  // 1) Persistência preserva diff_cents=+903, status='surplus' (CHECK válido) e grava marcador em cash_notes sem sujar notes do usuário
+  const payload = buildSessionPersistencePayload({
+    tenantId: 'tenant_1',
+    result: sampleResult25,
+    manualInputs: {
+      notes: 'Conferido com Marcela',
+      forcedBalanced: sampleResult25.forcedBalanced
+    },
+    markClosed: true
+  });
+  assert.equal(payload.sessionPayload.health_score, 100);
+  assert.equal(payload.sessionPayload.diff_cents, 903);
+  assert.equal(payload.sessionPayload.status, 'surplus');
+  assert.ok(payload.sessionPayload.cash_notes.includes('FORÇADO 100%'));
+  assert.equal(stripForcedCashMarkerTag(payload.sessionPayload.cash_notes), 'Conferido com Marcela');
+
+  // 2) Leitura leve de histórico detecta forçamento sem precisar de reconciled_summary
+  const parsedLight = parseForcedCashMetaFromSession({
+    health_score: 100,
+    diff_cents: 903,
+    status: 'surplus',
+    cash_notes: payload.sessionPayload.cash_notes
+  });
+  assert.equal(parsedLight.isForced, true);
+  assert.equal(parsedLight.rawScore, 73);
+  assert.equal(parsedLight.reason, 'Sobra de R$ 9,03 mantida como saldo positivo');
+
+  const hist = computeHistoricalHealthStats([
+    {
+      id: 'sess_forced',
+      reference_date: '2026-11-25',
+      status: 'surplus',
+      health_score: 100,
+      system_total_cents: 530919,
+      real_total_cents: 531822,
+      diff_cents: 903,
+      cash_notes: payload.sessionPayload.cash_notes,
+      closed_at: '2026-11-25T23:10:00Z'
+    },
+    {
+      id: 'sess_natural',
+      reference_date: '2026-11-24',
+      status: 'balanced',
+      health_score: 100,
+      system_total_cents: 320000,
+      real_total_cents: 320000,
+      diff_cents: 0,
+      cash_notes: '',
+      closed_at: '2026-11-24T23:10:00Z'
+    }
+  ]);
+  assert.equal(hist.forcedBalancedCount, 1);
+  assert.equal(hist.series.find((x) => x.id === 'sess_forced')?.isForcedBalanced, true);
+  assert.equal(hist.series.find((x) => x.id === 'sess_natural')?.isForcedBalanced, false);
+
+  // 3) buildCashHealthActionPlan guia passo a passo para sair de 73% -> 100% e aponta pares rápidos + caça aos +R$ 9,03
+  const plan = buildCashHealthActionPlan({ ...sampleResult25, isForcedBalanced: false, healthScore: 73 });
+  assert.equal(plan.rawHealthScore, 73);
+  assert.equal(plan.pointsMissing, 27);
+  assert.equal(plan.diffTotalCents, 903);
+  assert.ok(plan.steps.some((s) => s.key === 'suggestions' && s.pendingCount === 2));
+  assert.ok(plan.steps.some((s) => s.key === 'unmatched' && s.recoverablePoints >= 20));
+  assert.ok(plan.quickPairs.some((p) => p.sysItems[0].id === 'm_84' && p.realItems[0].id === 'r_74'));
+});

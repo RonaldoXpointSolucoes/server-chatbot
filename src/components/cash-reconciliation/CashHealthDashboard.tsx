@@ -19,7 +19,8 @@ import {
   ChevronUp,
   Trash2,
   User,
-  Calendar
+  Calendar,
+  Zap
 } from 'lucide-react';
 
 import {
@@ -27,7 +28,14 @@ import {
   CashReconciliationResult,
   formatCents
 } from '../../types/cashReconciliation';
-import { buildMirrorRowDetails, formatDateBr, formatDateBrShort, formatDateHeaderBadge } from '../../utils/cashReconciliationServiceHelper.mjs';
+import {
+  buildAcquirerFeeComparison,
+  buildMirrorRowDetails,
+  formatDateBr,
+  formatDateBrShort,
+  formatDateHeaderBadge,
+  parseForcedCashMetaFromSession
+} from '../../utils/cashReconciliationServiceHelper.mjs';
 import {
   resolveAuditWarningsExpandState,
   resolveNextAuditWarningsUserOverride
@@ -39,6 +47,7 @@ import { GeneralDiffTabKey } from './CashGeneralDiffModal';
 export interface HistoricalStatsData {
   totalSessions: number;
   balancedCount: number;
+  forcedBalancedCount?: number;
   balancedRatePct: number;
   avgHealthScore: number;
   totalShortageCents: number;
@@ -55,6 +64,9 @@ export interface HistoricalStatsData {
     operatorName?: string | null;
     createdAt?: string;
     isDraft?: boolean;
+    isForcedBalanced?: boolean;
+    forcedReason?: string;
+    rawScoreBeforeForce?: number | null;
   }>;
 }
 
@@ -136,8 +148,10 @@ export function CashHealthHistoryCard({
 
       <div className="flex items-end gap-2.5 overflow-x-auto pb-1">
         {visibleSeries.map((pt) => {
-          const barColor =
-            pt.status === 'balanced'
+          const isForced = Boolean(pt.isForcedBalanced);
+          const barColor = isForced
+            ? 'bg-gradient-to-t from-amber-500 via-orange-500 to-fuchsia-500 animate-pulse'
+            : pt.status === 'balanced'
               ? 'bg-emerald-500'
               : pt.status === 'attention'
                 ? 'bg-amber-500'
@@ -158,8 +172,10 @@ export function CashHealthHistoryCard({
             pt.operatorName ? `Op: ${pt.operatorName}` : '',
             pt.shiftLabel ? `Turno: ${pt.shiftLabel}` : '',
             pt.isDraft ? 'Rascunho' : 'Fechado',
-            `Saúde ${pt.healthScore}%`,
-            `Dif ${formatCents(pt.diffCents)}`
+            isForced
+              ? `FORÇADO A 100%${pt.rawScoreBeforeForce !== null && pt.rawScoreBeforeForce !== undefined ? ` (Técnica ${pt.rawScoreBeforeForce}%)` : ''}`
+              : `Saúde ${pt.healthScore}%`,
+            `Dif ${pt.diffCents > 0 ? '+' : pt.diffCents < 0 ? '-' : ''}${formatCents(Math.abs(pt.diffCents))}`
           ].filter(Boolean);
 
           return (
@@ -170,12 +186,22 @@ export function CashHealthHistoryCard({
               title={tooltipParts.join(' • ')}
               className="flex flex-col items-center gap-1 min-w-[52px] group cursor-pointer active:scale-95 transition-transform"
             >
-              <span className="text-[10px] font-bold text-slate-500 dark:text-[#8696a0] group-hover:text-[#00a884] tabular-nums">
-                {pt.healthScore}%
+              <span
+                className={`text-[10px] font-bold tabular-nums inline-flex items-center gap-0.5 ${
+                  isForced
+                    ? 'text-amber-600 dark:text-amber-300 animate-pulse font-black'
+                    : 'text-slate-500 dark:text-[#8696a0] group-hover:text-[#00a884]'
+                }`}
+              >
+                {pt.healthScore}%{isForced ? '⚡' : ''}
               </span>
               <div
                 className={`relative w-7 h-16 rounded-lg bg-slate-100 dark:bg-[#111b21] flex items-end overflow-hidden p-0.5 ${
-                  pt.isDraft ? 'ring-1 ring-amber-400/60' : ''
+                  isForced
+                    ? 'ring-2 ring-amber-500/80'
+                    : pt.isDraft
+                      ? 'ring-1 ring-amber-400/60'
+                      : ''
                 }`}
               >
                 <div
@@ -218,6 +244,8 @@ export function CashHealthHistoryCard({
             const operatorLabel = s.operator_name?.trim() || '';
             const shiftLabel = s.shift_label?.trim() || '';
 
+            const isForced = parseForcedCashMetaFromSession(s).isForced;
+
             return (
               <div
                 key={s.id}
@@ -231,7 +259,11 @@ export function CashHealthHistoryCard({
                     onSelectSession?.(s.id);
                   }
                 }}
-                className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-slate-50/75 dark:bg-[#111b21]/80 hover:border-[#00a884]/60 p-3.5 space-y-2 transition-all cursor-pointer active:scale-[0.99] min-w-0 overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#00a884]/50"
+                className={`text-left rounded-2xl border p-3.5 space-y-2 transition-all cursor-pointer active:scale-[0.99] min-w-0 overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#00a884]/50 ${
+                  isForced
+                    ? 'border-amber-500/60 bg-amber-500/[0.06] hover:border-amber-500'
+                    : 'border-slate-200/80 dark:border-[#2a3942] bg-slate-50/75 dark:bg-[#111b21]/80 hover:border-[#00a884]/60'
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex flex-wrap items-center gap-1.5">
@@ -253,9 +285,15 @@ export function CashHealthHistoryCard({
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#00a884]/15 text-[#00a884] whitespace-nowrap">
-                      Saúde {s.health_score}%{isDraft ? ' • Rascunho' : ''}
-                    </span>
+                    {isForced ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 border border-amber-500/60 text-amber-700 dark:text-amber-300 whitespace-nowrap inline-flex items-center gap-1 animate-pulse">
+                        <Zap size={10} /> 100% Forçado{isDraft ? ' • Rasc.' : ''}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#00a884]/15 text-[#00a884] whitespace-nowrap">
+                        Saúde {s.health_score}%{isDraft ? ' • Rascunho' : ''}
+                      </span>
+                    )}
                     {onDeleteSession && (
                       <button
                         type="button"
@@ -323,12 +361,9 @@ export function CashHealthHistoryCard({
 
 interface CashHealthDashboardProps {
   result: CashReconciliationResult;
-  historicalStats: HistoricalStatsData;
-  sessions?: CashSessionRow[];
-  onSelectSession?: (sessionId: string) => void;
-  onDeleteSession?: (session: CashSessionRow) => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
   onOpenGeneralDiff?: (tab?: GeneralDiffTabKey) => void;
+  onOpenHealthRoadmap?: () => void;
   onOpenChecklist?: () => void;
 }
 
@@ -361,12 +396,9 @@ const STATUS_BADGE: Record<string, { label: string; badgeClass: string; barClass
 
 export function CashHealthDashboard({
   result,
-  historicalStats,
-  sessions,
-  onSelectSession,
-  onDeleteSession,
   onOpenMirrorCategory,
   onOpenGeneralDiff,
+  onOpenHealthRoadmap,
   onOpenChecklist
 }: CashHealthDashboardProps) {
   const [activeMetricKey, setActiveMetricKey] = useState<HealthMetricKey | null>(null);
@@ -390,6 +422,13 @@ export function CashHealthDashboard({
   const pendRow = getMirror('pendentes');
   const pixBridge = useMemo(() => buildMirrorRowDetails(result, 'pix').reconciliationBridge, [result]);
   const cardBridge = useMemo(() => buildMirrorRowDetails(result, 'cartao').reconciliationBridge, [result]);
+  const acquirerComparison = useMemo(
+    () =>
+      buildAcquirerFeeComparison(
+        (result.realItems || []).filter((it) => it.category === 'cartao' || Number(it.feeCents || 0) > 0)
+      ),
+    [result.realItems]
+  );
   const renderChannelBridgeNote = (bridge?: {
     extraCents: number;
     missingCents: number;
@@ -427,6 +466,9 @@ export function CashHealthDashboard({
   );
   const criticalErrors = validationWarnings.filter((w) => w.severity === 'error');
   const hasCriticalValidationError = criticalErrors.length > 0;
+  const hasWrongDayAlert = validationWarnings.some(
+    (w) => w.code === 'wrong_day_real_file' || w.code === 'wrong_day_system_file'
+  );
   const criticalSig = criticalErrors.map((w) => `${w.code}:${w.title}`).join('|');
 
   useEffect(() => {
@@ -449,16 +491,23 @@ export function CashHealthDashboard({
       {validationWarnings.length > 0 && (
         <div
           className={`rounded-2xl border px-3.5 py-2.5 text-xs transition-all ${
-            hasCriticalValidationError
-              ? 'border-rose-500/35 bg-rose-500/10 text-rose-800 dark:text-rose-200'
-              : validationWarnings.some((w) => w.severity === 'warning')
-                ? 'border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200'
-                : 'border-cyan-500/35 bg-cyan-500/10 text-cyan-900 dark:text-cyan-200'
+            hasWrongDayAlert
+              ? 'animate-cash-wrong-day-blink border-rose-500 bg-rose-500/15 text-rose-900 dark:text-rose-100'
+              : hasCriticalValidationError
+                ? 'border-rose-500/35 bg-rose-500/10 text-rose-800 dark:text-rose-200'
+                : validationWarnings.some((w) => w.severity === 'warning')
+                  ? 'border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200'
+                  : 'border-cyan-500/35 bg-cyan-500/10 text-cyan-900 dark:text-cyan-200'
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
-              <AlertTriangle size={15} className="shrink-0" />
+              <AlertTriangle size={15} className={`shrink-0 ${hasWrongDayAlert ? 'animate-cash-wrong-day-badge text-rose-500 dark:text-rose-300' : ''}`} />
+              {hasWrongDayAlert && (
+                <span className="animate-cash-wrong-day-badge px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                  Data errada
+                </span>
+              )}
               <span className="font-black">
                 {validationWarnings.length} alerta(s) de auditoria:
               </span>
@@ -490,17 +539,29 @@ export function CashHealthDashboard({
 
           {isValidationExpanded && (
             <div className="mt-2.5 pt-2.5 border-t border-current/15 space-y-2">
-              {validationWarnings.map((warn, idx) => (
-                <div key={`${warn.code}_${idx}`} className="flex items-start gap-2">
-                  <span className="px-1.5 py-0.5 rounded bg-white/70 dark:bg-[#111b21]/70 text-[10px] font-black uppercase shrink-0">
-                    {warn.severity === 'error' ? 'Erro' : warn.severity === 'warning' ? 'Atenção' : 'Info'}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="font-bold leading-tight">{warn.title}</p>
-                    <p className="text-[11px] opacity-90 leading-snug mt-0.5">{warn.message}</p>
+              {validationWarnings.map((warn, idx) => {
+                const isWrongDayItem = warn.code === 'wrong_day_real_file' || warn.code === 'wrong_day_system_file';
+                return (
+                  <div
+                    key={`${warn.code}_${idx}`}
+                    className={`flex items-start gap-2 ${isWrongDayItem ? 'rounded-xl px-2 py-1.5 border border-rose-500/60 bg-rose-500/15' : ''}`}
+                  >
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase shrink-0 ${
+                        isWrongDayItem
+                          ? 'animate-cash-wrong-day-badge bg-rose-600 text-white'
+                          : 'bg-white/70 dark:bg-[#111b21]/70'
+                      }`}
+                    >
+                      {isWrongDayItem ? 'Data Errada' : warn.severity === 'error' ? 'Erro' : warn.severity === 'warning' ? 'Atenção' : 'Info'}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-bold leading-tight">{warn.title}</p>
+                      <p className="text-[11px] opacity-90 leading-snug mt-0.5">{warn.message}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -515,6 +576,17 @@ export function CashHealthDashboard({
                 {statusMeta.icon}
                 {statusMeta.label}
               </span>
+              {result.isForcedBalanced && (
+                <button
+                  type="button"
+                  onClick={() => onOpenHealthRoadmap?.()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-500/70 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-fuchsia-500/20 text-amber-700 dark:text-amber-300 text-xs font-black tracking-wide animate-pulse hover:brightness-110 transition-all"
+                  title="Este fechamento foi forçado para 100% mantendo a diferença real visível"
+                >
+                  <Zap size={13} />
+                  100% FORÇADO • Real: {result.rawHealthScore ?? result.healthScore}%
+                </button>
+              )}
               {result.storeName && (
                 <span className="text-xs font-bold text-slate-600 dark:text-[#aebac1] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#111b21]">
                   {result.storeName}
@@ -626,33 +698,67 @@ export function CashHealthDashboard({
             </div>
           </div>
 
-          {/* Termômetro Score de Saúde */}
-          <div className="xl:w-64 2xl:w-72 shrink-0 rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-gradient-to-br from-slate-50 to-white dark:from-[#111b21] dark:to-[#18242b] p-4 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between gap-2">
+          {/* Termômetro Score de Saúde (Clicável p/ Guia 100% e Batimento Rápido) */}
+          <button
+            type="button"
+            onClick={() => onOpenHealthRoadmap?.()}
+            className={`xl:w-64 2xl:w-72 shrink-0 text-left group rounded-2xl border p-4 flex flex-col justify-between gap-2.5 cursor-pointer active:scale-[0.98] transition-all ${
+              result.isForcedBalanced
+                ? 'border-amber-500/70 bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-fuchsia-500/10 hover:border-amber-500 shadow-[0_0_24px_rgba(245,158,11,0.18)]'
+                : 'border-slate-200/80 dark:border-[#2a3942] bg-gradient-to-br from-slate-50 to-white dark:from-[#111b21] dark:to-[#18242b] hover:border-[#00a884]/70'
+            }`}
+            title="Clique para abrir o plano completo para chegar a 100%, bater pendências ou forçar fechamento"
+          >
+            <div className="flex items-center justify-between gap-2 w-full">
               <span className="uppercase text-[10px] font-black tracking-wider text-slate-500 dark:text-[#8696a0] flex items-center gap-1.5">
-                <Activity size={13} className="text-[#00a884]" />
+                {result.isForcedBalanced ? (
+                  <Zap size={13} className="text-amber-500 animate-pulse" />
+                ) : (
+                  <Activity size={13} className="text-[#00a884]" />
+                )}
                 Saúde do Caixa
               </span>
-              <span className="text-2xl font-black text-slate-900 dark:text-white tabular-nums whitespace-nowrap">
-                {result.healthScore}%
-              </span>
+              <div className="flex items-center gap-1.5">
+                {result.isForcedBalanced ? (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/60 text-amber-700 dark:text-amber-300 text-[9.5px] font-black uppercase animate-pulse">
+                    Forçado
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] text-[9.5px] font-black group-hover:bg-[#00a884] group-hover:text-white transition-colors">
+                    Resolver <ChevronRight size={10} />
+                  </span>
+                )}
+                <span
+                  className={`text-2xl font-black tabular-nums whitespace-nowrap ${
+                    result.isForcedBalanced ? 'text-amber-600 dark:text-amber-300' : 'text-slate-900 dark:text-white'
+                  }`}
+                >
+                  {result.healthScore}%
+                </span>
+              </div>
             </div>
             <div className="w-full h-3 rounded-full bg-slate-200 dark:bg-[#2a3942] overflow-hidden">
               <div
-                className={`h-full rounded-full bg-gradient-to-r ${statusMeta.barClass} transition-all duration-500`}
+                className={`h-full rounded-full transition-all duration-500 ${
+                  result.isForcedBalanced
+                    ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-fuchsia-500 animate-pulse'
+                    : `bg-gradient-to-r ${statusMeta.barClass}`
+                }`}
                 style={{ width: `${Math.max(4, Math.min(100, result.healthScore || 0))}%` }}
               />
             </div>
             <p className="text-[11px] text-slate-500 dark:text-[#8696a0] leading-snug">
-              {hasMissingCardAcquirers
-                ? 'Importe Rede e C6 Pay para conciliar os cartões do PDV.'
-                : drawer.countedCents === null
-                  ? 'Informe o Dinheiro Contado na gaveta na aba Espelho para finalizar o fechamento.'
-                  : Math.abs(diffCents) <= 100 && !result.suggestions?.length
-                    ? 'Conferência conciliada dentro da tolerância.'
-                    : 'Revise as sugestões e itens pendentes nas abas abaixo.'}
+              {result.isForcedBalanced
+                ? `Técnica real: ${result.rawHealthScore ?? result.healthScore}% • Diferença: ${formattedDiff}. Clique para revisar.`
+                : hasMissingCardAcquirers
+                  ? 'Importe Rede e C6 Pay para conciliar os cartões do PDV.'
+                  : drawer.countedCents === null
+                    ? 'Informe o Dinheiro Contado na gaveta na aba Espelho para finalizar o fechamento.'
+                    : Math.abs(diffCents) <= 100 && !result.suggestions?.length && !result.missingInBank?.length && !result.extraInBank?.length
+                      ? 'Conferência conciliada dentro da tolerância.'
+                      : 'Clique aqui para ver exatamente o que falta resolver para 100%.'}
             </p>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -733,7 +839,19 @@ export function CashHealthDashboard({
               {renderChannelBridgeNote(cardBridge)}
               {metrics.cardBreakdown && (metrics.cardBreakdown.redeCardCents > 0 || metrics.cardBreakdown.c6PayCardCents > 0) && (
                 <p className="text-[10px] text-slate-500 dark:text-[#8696a0] mt-1 truncate">
-                  Rede {formatCents(metrics.cardBreakdown.redeCardCents)} • C6 Pay {formatCents(metrics.cardBreakdown.c6PayCardCents)}
+                  {acquirerComparison.hasMultipleSources && acquirerComparison.sources.length >= 2
+                    ? acquirerComparison.sources
+                        .map((s: { label: string; grossCents: number; effectiveRatePct: number }) =>
+                          `${s.label} ${formatCents(s.grossCents)} (${s.effectiveRatePct.toFixed(2).replace('.', ',')}%)`
+                        )
+                        .join(' • ')
+                    : `Rede ${formatCents(metrics.cardBreakdown.redeCardCents)} • C6 Pay ${formatCents(metrics.cardBreakdown.c6PayCardCents)}`}
+                </p>
+              )}
+              {acquirerComparison.hasMultipleSources && acquirerComparison.headlineSavingsCents > 0 && (
+                <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+                  Dif. {acquirerComparison.rateSpreadPctPoints.toFixed(2).replace('.', ',')} p.p. • Economia possível:{' '}
+                  +{formatCents(acquirerComparison.headlineSavingsCents)}
                 </p>
               )}
             </>
@@ -815,11 +933,17 @@ export function CashHealthDashboard({
           [
             {
               key: 'fees' as HealthMetricKey,
-              title: 'Clique para detalhar taxas MDR por maquininha',
+              title: 'Clique para detalhar taxas MDR por maquininha e economia possível',
               label: 'Taxas Cartão',
               icon: <Percent size={11} className="shrink-0" />,
               value: formatCents(metrics.totalMdrFeeCents),
-              valueClass: 'text-rose-600 dark:text-rose-400'
+              valueClass: 'text-rose-600 dark:text-rose-400',
+              subNote:
+                acquirerComparison.hasMultipleSources && acquirerComparison.headlineSavingsCents > 0
+                  ? `Econ. +${formatCents(acquirerComparison.headlineSavingsCents)} (${acquirerComparison.cheapestSource?.label || ''})`
+                  : acquirerComparison.hasMultipleSources && acquirerComparison.rateSpreadPctPoints > 0
+                    ? `Dif. ${acquirerComparison.rateSpreadPctPoints.toFixed(2).replace('.', ',')} p.p.`
+                    : ''
             },
             {
               key: 'net_digital' as HealthMetricKey,
@@ -827,7 +951,8 @@ export function CashHealthDashboard({
               label: 'Líquido Digital',
               icon: <Receipt size={11} className="shrink-0" />,
               value: formatCents(metrics.totalNetDigitalCents),
-              valueClass: 'text-emerald-600 dark:text-emerald-400'
+              valueClass: 'text-emerald-600 dark:text-emerald-400',
+              subNote: ''
             },
             {
               key: 'cancelled' as HealthMetricKey,
@@ -835,7 +960,8 @@ export function CashHealthDashboard({
               label: `Cancelados (${metrics.cancelledCount || 0})`,
               icon: <Ban size={11} className="shrink-0" />,
               value: formatCents(metrics.cancelledCents),
-              valueClass: 'text-slate-800 dark:text-[#e9edef]'
+              valueClass: 'text-slate-800 dark:text-[#e9edef]',
+              subNote: ''
             },
             {
               key: 'discounts' as HealthMetricKey,
@@ -843,7 +969,8 @@ export function CashHealthDashboard({
               label: 'Descontos',
               icon: <Coffee size={11} className="shrink-0" />,
               value: formatCents(metrics.discountsCents),
-              valueClass: 'text-slate-800 dark:text-[#e9edef]'
+              valueClass: 'text-slate-800 dark:text-[#e9edef]',
+              subNote: ''
             },
             {
               key: 'delivery_house_fees' as HealthMetricKey,
@@ -851,7 +978,8 @@ export function CashHealthDashboard({
               label: 'Taxa Entrega + Casa',
               icon: null,
               value: formatCents((metrics.deliveryFeeCents || 0) + (metrics.serviceFeeCents || 0)),
-              valueClass: 'text-slate-800 dark:text-[#e9edef]'
+              valueClass: 'text-slate-800 dark:text-[#e9edef]',
+              subNote: ''
             },
             {
               key: 'guests' as HealthMetricKey,
@@ -859,7 +987,8 @@ export function CashHealthDashboard({
               label: `Pessoas (${metrics.guestCount || 0})`,
               icon: <Users size={11} className="shrink-0" />,
               value: `${formatCents(metrics.averageTicketCents)}/p`,
-              valueClass: 'text-slate-800 dark:text-[#e9edef]'
+              valueClass: 'text-slate-800 dark:text-[#e9edef]',
+              subNote: ''
             }
           ] as const
         ).map((card) => (
@@ -880,6 +1009,11 @@ export function CashHealthDashboard({
             <p className={`text-sm font-black mt-0.5 tabular-nums whitespace-nowrap truncate ${card.valueClass}`}>
               {card.value}
             </p>
+            {card.subNote && (
+              <p className="text-[9.5px] font-bold text-emerald-600 dark:text-emerald-400 truncate mt-0.5 tabular-nums">
+                {card.subNote}
+              </p>
+            )}
           </button>
         ))}
       </div>
@@ -891,14 +1025,6 @@ export function CashHealthDashboard({
           onClose={() => setActiveMetricKey(null)}
         />
       )}
-
-      {/* Histórico Multi-Dias de Saúde */}
-      <CashHealthHistoryCard
-        historicalStats={historicalStats}
-        sessions={sessions}
-        onSelectSession={onSelectSession}
-        onDeleteSession={onDeleteSession}
-      />
     </div>
   );
 }

@@ -330,3 +330,35 @@ test('buildCashWhatsappSummaryMessage and buildCashPdfReportHtml render manualCa
   assert.doesNotMatch(html, /<script>/i);
   assert.doesNotMatch(html, /NaN|undefined/);
 });
+
+test('buildCashWhatsappSummaryMessage and buildCashPdfReportHtml highlight forced 100% closing while preserving diffTotalCents (+R$ 9,03)', () => {
+  const forcedResult = {
+    referenceDate: '2026-11-25',
+    storeName: 'Burguer Plus',
+    operatorName: 'MARCELA',
+    status: 'surplus',
+    healthScore: 100,
+    rawHealthScore: 73,
+    isForcedBalanced: true,
+    forcedBalanced: {
+      enabled: true,
+      reason: 'Sobra de R$ 9,03 conferida no Turno <Noite>'
+    },
+    systemTotalCents: 530919,
+    realTotalCents: 531822,
+    diffTotalCents: 903,
+    mirrorRows: []
+  };
+
+  const whatsapp = buildCashWhatsappSummaryMessage({ result: forcedResult });
+  assert.match(whatsapp, /100% \(FORÇADO/);
+  assert.match(whatsapp, /Saúde técnica real: 73%/);
+  assert.match(whatsapp, /\+R\$\s?9,03/);
+  assert.match(whatsapp, /Sobra de R\$ 9,03 conferida/);
+
+  const html = buildCashPdfReportHtml({ result: forcedResult });
+  assert.match(html, /Saúde do Caixa: 100% \(FORÇADO\)/);
+  assert.match(html, /Técnica real: 73%/);
+  assert.match(html, /Turno &lt;Noite&gt;/);
+  assert.match(html, /\+R\$\s?9,03/);
+});

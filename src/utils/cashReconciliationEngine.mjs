@@ -5,7 +5,8 @@ import {
   annotateMissingItemsWithOperationalHints,
   buildAuditInsights,
   linkPendingDebtorsToSystemItems,
-  linkSoldItemsToPdvOperations
+  linkSoldItemsToPdvOperations,
+  normalizeOrderModule
 } from './cashOperationItemsHelper.mjs';
 
 const CLOSING_SANGRIA_LABEL_RE = /\b(CX\.?\s*RET|RETIRADA|FECHAMENTO)\b/i;
@@ -296,7 +297,7 @@ function formatBrlDiagnostic(cents) {
   return `R$ ${intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${decPart}`;
 }
 
-function buildSmallDiffSuggestions({
+function buildProximityDigitalSuggestions({
   systemItems,
   realItems,
   usedSys,
@@ -308,9 +309,12 @@ function buildSmallDiffSuggestions({
   confirmedSuggestionIds,
   matchedPairs,
   suggestions,
-  tol,
-  maxDiffCents = 500,
-  maxWindowSec = 30 * 60
+  minDiffCents,
+  maxDiffCents,
+  minSimilarityPct = 0,
+  maxWindowSec = 30 * 60,
+  reasonType = 'small_diff',
+  sugIdPrefix = 'sug_diff_'
 }) {
   const candidates = [];
   for (const sys of systemItems) {
@@ -323,7 +327,10 @@ function buildSmallDiffSuggestions({
 
       const rawDiff = real.amountCents - sys.amountCents;
       const absDiff = Math.abs(rawDiff);
-      if (absDiff <= tol || absDiff > maxDiffCents) continue;
+      if (absDiff < minDiffCents || absDiff > maxDiffCents) continue;
+
+      const similarityPct = computeAmountSimilarityPct(sys.amountCents, real.amountCents);
+      if (similarityPct < minSimilarityPct) continue;
 
       let dt = getTimeDiffSec(sys, real);
       if (
@@ -337,7 +344,14 @@ function buildSmallDiffSuggestions({
       }
       if (dt > maxWindowSec) continue;
 
-      candidates.push({ sys, real, rawDiff, absDiff, dt, score: absDiff * 100000 + dt });
+      const isDelivery = isDeliveryOrderItem(sys);
+      const deliveryBoost = reasonType === 'high_similarity' && isDelivery && rawDiff > 0 ? 0 : 10000;
+      const score =
+        reasonType === 'high_similarity'
+          ? (100 - similarityPct) * 100000 + deliveryBoost + dt
+          : absDiff * 100000 + dt;
+
+      candidates.push({ sys, real, rawDiff, absDiff, similarityPct, isDelivery, dt, score });
     }
   }
 
@@ -346,7 +360,7 @@ function buildSmallDiffSuggestions({
     if (usedSys.has(cand.sys.id) || usedReal.has(cand.real.id)) continue;
     if (reservedSugSys.has(cand.sys.id) || reservedSugReal.has(cand.real.id)) continue;
 
-    const sugId = `sug_diff_${cand.sys.id}_${cand.real.id}`;
+    const sugId = `${sugIdPrefix}${cand.sys.id}_${cand.real.id}`;
     if (rejectedSuggestionIds.has(sugId)) continue;
 
     reservedSugSys.add(cand.sys.id);
@@ -354,12 +368,19 @@ function buildSmallDiffSuggestions({
 
     const delayMin = Math.max(1, Math.round(cand.dt / 60));
     const signedDiffStr = `${cand.rawDiff > 0 ? '+' : '-'}${formatBrlDiagnostic(cand.rawDiff)}`;
+    const reasonText =
+      reasonType === 'high_similarity'
+        ? `${cand.isDelivery ? 'Delivery PDV' : 'PDV'} ${formatBrlDiagnostic(cand.sys.amountCents)} (${cand.sys.timeStr}) vs ${cand.real.source.toUpperCase()} ${formatBrlDiagnostic(cand.real.amountCents)} (${cand.real.timeStr}) • dif. ${signedDiffStr} (${cand.similarityPct}% semelhante em ${delayMin} min${cand.isDelivery && cand.rawDiff > 0 ? ' — possível taxa de entrega paga à parte' : ''})`
+        : `PDV ${formatBrlDiagnostic(cand.sys.amountCents)} (${cand.sys.timeStr}) vs ${cand.real.source.toUpperCase()} ${formatBrlDiagnostic(cand.real.amountCents)} (${cand.real.timeStr}) • dif. ${signedDiffStr} em ${delayMin} min`;
+
     const suggestionObj = {
       id: sugId,
-      reasonType: 'small_diff',
-      reasonText: `PDV ${formatBrlDiagnostic(cand.sys.amountCents)} (${cand.sys.timeStr}) vs ${cand.real.source.toUpperCase()} ${formatBrlDiagnostic(cand.real.amountCents)} (${cand.real.timeStr}) • dif. ${signedDiffStr} em ${delayMin} min`,
+      reasonType,
+      reasonText,
       amountCents: cand.sys.amountCents,
       diffCents: cand.rawDiff,
+      ...(reasonType === 'high_similarity' ? { similarityPct: cand.similarityPct } : {}),
+      ...(cand.isDelivery ? { isDelivery: true } : {}),
       systemIds: [cand.sys.id],
       realIds: [cand.real.id],
       systemItems: [cand.sys],
@@ -372,7 +393,7 @@ function buildSmallDiffSuggestions({
       matchedPairs.push({
         id: `match_conf_${sugId}`,
         matchType: 'matched_manual',
-        reasonType: 'small_diff',
+        reasonType,
         reasonText: suggestionObj.reasonText,
         systemItems: [cand.sys],
         realItems: [cand.real],
@@ -381,6 +402,319 @@ function buildSmallDiffSuggestions({
       });
     } else {
       suggestions.push(suggestionObj);
+    }
+  }
+}
+
+function buildSmallDiffSuggestions(params) {
+  return buildProximityDigitalSuggestions({
+    ...params,
+    minDiffCents: (params.tol ?? 1) + 1,
+    maxDiffCents: params.maxDiffCents ?? 500,
+    minSimilarityPct: 0,
+    maxWindowSec: params.maxWindowSec ?? 30 * 60,
+    reasonType: 'small_diff',
+    sugIdPrefix: 'sug_diff_'
+  });
+}
+
+function buildHighSimilarityDigitalSuggestions(params) {
+  return buildProximityDigitalSuggestions({
+    ...params,
+    minDiffCents: 501,
+    maxDiffCents: params.maxDiffCents ?? 2500,
+    minSimilarityPct: params.minSimilarityPct ?? 80,
+    maxWindowSec: Math.max(params.swapWindowSec ?? 2 * 3600, 2 * 3600),
+    reasonType: 'high_similarity',
+    sugIdPrefix: 'sug_hsim_'
+  });
+}
+
+function isDeliveryOrderItem(item) {
+  const mod = normalizeOrderModule(
+    item?.metadata?.orderDetail?.module || '',
+    item?.metadata?.orderDetail?.origin || '',
+    item?.terminalName || ''
+  );
+  if (mod === 'DELIVERY') return true;
+  return /\b(delivery|entrega|ifood|motoboy)\b/i.test(String(item?.description || ''));
+}
+
+function computeAmountSimilarityPct(amtA, amtB) {
+  const a = Math.abs(Math.round(Number(amtA || 0)));
+  const b = Math.abs(Math.round(Number(amtB || 0)));
+  const maxAmt = Math.max(a, b, 1);
+  return Math.max(0, Math.min(100, Math.round((1 - Math.abs(a - b) / maxAmt) * 100)));
+}
+
+/**
+ * Sugere vínculos de alta semelhança quando uma venda foi lançada em DINHEIRO no PDV,
+ * mas existe recebimento bancário/maquininha sobrando (extraInBank) com valor muito próximo.
+ */
+function buildCashSimilarityBankSuggestions({
+  systemItems,
+  realItems,
+  usedSys,
+  usedReal,
+  ignoredIds,
+  reservedSugSys,
+  reservedSugReal,
+  rejectedSuggestionIds,
+  confirmedSuggestionIds,
+  matchedPairs,
+  suggestions,
+  tol,
+  swapWindowSec
+}) {
+  const candidates = [];
+  for (const sys of systemItems) {
+    if (usedSys.has(sys.id) || ignoredIds.has(sys.id) || reservedSugSys.has(sys.id)) continue;
+    if (sys.category !== 'dinheiro' || Number(sys.amountCents || 0) < 500) continue;
+
+    for (const real of realItems) {
+      if (usedReal.has(real.id) || ignoredIds.has(real.id) || reservedSugReal.has(real.id)) continue;
+      if (Number(real.amountCents || 0) < 500) continue;
+
+      const rawDiff = real.amountCents - sys.amountCents;
+      const absDiff = Math.abs(rawDiff);
+      if (absDiff <= tol) continue;
+
+      const maxAmt = Math.max(sys.amountCents, real.amountCents);
+      const maxAllowedDiff = Math.max(1500, Math.round(maxAmt * 0.18));
+      const similarityPct = computeAmountSimilarityPct(sys.amountCents, real.amountCents);
+      if (absDiff > maxAllowedDiff || similarityPct < 82) continue;
+
+      const sugId = `sug_cash_sim_${sys.id}_${real.id}`;
+      if (rejectedSuggestionIds.has(sugId)) continue;
+
+      const dt = getTimeDiffSec(sys, real);
+      const isDelivery = isDeliveryOrderItem(sys);
+      const outOfWindowPenalty = dt <= Math.max(swapWindowSec, 2 * 3600) ? 0 : 1000000;
+      const score = absDiff * 1000 + (isDelivery ? 0 : 5000) + outOfWindowPenalty + dt;
+      candidates.push({ sys, real, rawDiff, absDiff, similarityPct, isDelivery, dt, sugId, score });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  for (const cand of candidates) {
+    if (usedSys.has(cand.sys.id) || usedReal.has(cand.real.id)) continue;
+    if (reservedSugSys.has(cand.sys.id) || reservedSugReal.has(cand.real.id)) continue;
+
+    reservedSugSys.add(cand.sys.id);
+    reservedSugReal.add(cand.real.id);
+
+    const signedDiff = `${cand.rawDiff > 0 ? '+' : '-'}${formatBrlDiagnostic(cand.rawDiff)}`;
+    const realCatLabel = cand.real.category === 'pix' ? 'PIX' : cand.real.category === 'cartao' ? 'CARTÃO' : String(cand.real.category || '').toUpperCase();
+    const suggestionObj = {
+      id: cand.sugId,
+      reasonType: 'cash_similarity',
+      reasonText: `Venda ${cand.isDelivery ? 'DELIVERY ' : ''}lançada em DINHEIRO (${formatBrlDiagnostic(cand.sys.amountCents)}) tem ${cand.similarityPct}% de semelhança com sobra ${realCatLabel} em ${cand.real.source.toUpperCase()} (${formatBrlDiagnostic(cand.real.amountCents)} • dif. ${signedDiff}).`,
+      amountCents: cand.sys.amountCents,
+      diffCents: cand.rawDiff,
+      similarityPct: cand.similarityPct,
+      suggestedTargetCategory: cand.real.category === 'pix' || cand.real.category === 'cartao' ? cand.real.category : undefined,
+      isDelivery: cand.isDelivery,
+      systemIds: [cand.sys.id],
+      realIds: [cand.real.id],
+      systemItems: [cand.sys],
+      realItems: [cand.real]
+    };
+
+    if (confirmedSuggestionIds.has(cand.sugId)) {
+      usedSys.add(cand.sys.id);
+      usedReal.add(cand.real.id);
+      matchedPairs.push({
+        id: `match_conf_${cand.sugId}`,
+        matchType: 'matched_manual',
+        reasonType: 'cash_similarity',
+        reasonText: suggestionObj.reasonText,
+        systemItems: [cand.sys],
+        realItems: [cand.real],
+        amountCents: cand.sys.amountCents,
+        diffCents: cand.rawDiff
+      });
+    } else {
+      suggestions.push(suggestionObj);
+    }
+  }
+}
+
+/**
+ * Analisa falta/sobra física na gaveta (Saldo em Dinheiro) contra pedidos do PDV:
+ * - Se faltar dinheiro: detecta pedidos em Dinheiro (priorizando Delivery) compatíveis com a falta,
+ *   sugerindo a troca rápida para Nota Pendente (`cash_to_pending`).
+ * - Se sobrar dinheiro: detecta pedidos Pendentes ou em falta no banco compatíveis com a sobra (`surplus_to_cash`).
+ */
+function buildDrawerCashAnomalySuggestions({
+  systemItems,
+  missingInBank,
+  usedSys,
+  ignoredIds,
+  reservedSugSys,
+  rejectedSuggestionIds,
+  suggestions,
+  hasCashRealInformed,
+  cashDrawerDiffCents,
+  swappedToDigitalCents,
+  tol
+}) {
+  if (!hasCashRealInformed) return;
+  const minSignal = Math.max(tol, 100);
+
+  if (cashDrawerDiffCents < -minSignal) {
+    const targetShortage = Math.max(0, Math.abs(cashDrawerDiffCents) - Math.max(0, swappedToDigitalCents || 0));
+    if (targetShortage <= minSignal) return;
+
+    const pool = systemItems.filter(
+      (s) => s.category === 'dinheiro' && !usedSys.has(s.id) && !ignoredIds.has(s.id) && !reservedSugSys.has(s.id) && Number(s.amountCents || 0) > 0
+    );
+    const maxAllowedDiff = Math.max(2500, Math.round(targetShortage * 0.3));
+    const singleCandidates = [];
+
+    for (const s of pool) {
+      const absDiff = Math.abs(s.amountCents - targetShortage);
+      const similarityPct = computeAmountSimilarityPct(s.amountCents, targetShortage);
+      const isExact = absDiff <= Math.max(tol, 5);
+      if (!isExact && (similarityPct < 75 || absDiff > maxAllowedDiff)) continue;
+
+      const sugId = `sug_cash_to_pend_${s.id}`;
+      if (rejectedSuggestionIds.has(sugId)) continue;
+
+      const isDelivery = isDeliveryOrderItem(s);
+      const closeDiffBonus = absDiff <= 500 ? 0 : 1;
+      const score =
+        (isExact ? 0 : 1000000) +
+        (isDelivery ? 0 : 100000) +
+        closeDiffBonus * 50000 +
+        absDiff * 10 -
+        Math.min(5000, Math.round(s.amountCents / 100));
+
+      singleCandidates.push({ s, absDiff, similarityPct, isExact, isDelivery, sugId, score });
+    }
+
+    singleCandidates.sort((a, b) => a.score - b.score);
+    let emitted = 0;
+    let hasExactMatch = false;
+
+    for (const cand of singleCandidates) {
+      if (emitted >= 3) break;
+      if (hasExactMatch && !cand.isExact && cand.absDiff > 500) break;
+      if (cand.isExact) hasExactMatch = true;
+
+      reservedSugSys.add(cand.s.id);
+      const diffFromShortage = cand.s.amountCents - targetShortage;
+      suggestions.push({
+        id: cand.sugId,
+        reasonType: 'cash_to_pending',
+        reasonText: `Falta de -${formatBrlDiagnostic(targetShortage)} no Saldo em Dinheiro • Pedido ${cand.isDelivery ? 'DELIVERY ' : ''}"${cand.s.description}" (${formatBrlDiagnostic(cand.s.amountCents)}, ${cand.similarityPct}% semelhante) pode ter sido lançado em Dinheiro por engano em vez de Nota Pendente.`,
+        amountCents: cand.s.amountCents,
+        diffCents: diffFromShortage,
+        similarityPct: cand.similarityPct,
+        suggestedTargetCategory: 'pendente',
+        drawerTargetCents: -targetShortage,
+        isDelivery: cand.isDelivery,
+        systemIds: [cand.s.id],
+        realIds: [],
+        systemItems: [cand.s],
+        realItems: []
+      });
+      emitted += 1;
+    }
+
+    // Se nenhuma venda única bateu exato com a falta, verifica par de pedidos em Dinheiro cuja soma explica a falta
+    if (!hasExactMatch && pool.length >= 2) {
+      let bestPair = null;
+      const ordered = [...pool].sort((a, b) => (isDeliveryOrderItem(b) ? 1 : 0) - (isDeliveryOrderItem(a) ? 1 : 0)).slice(0, 24);
+      const pairTol = Math.max(tol, 300);
+
+      for (let i = 0; i < ordered.length; i++) {
+        for (let j = i + 1; j < ordered.length; j++) {
+          const a = ordered[i];
+          const b = ordered[j];
+          if (reservedSugSys.has(a.id) && reservedSugSys.has(b.id)) continue;
+          const sum = a.amountCents + b.amountCents;
+          const absDiff = Math.abs(sum - targetShortage);
+          if (absDiff > pairTol) continue;
+
+          const deliveryCount = (isDeliveryOrderItem(a) ? 1 : 0) + (isDeliveryOrderItem(b) ? 1 : 0);
+          const sugId = `sug_cash_to_pend_pair_${a.id}_${b.id}`;
+          if (rejectedSuggestionIds.has(sugId)) continue;
+
+          const score = absDiff * 100 - deliveryCount * 50000;
+          if (!bestPair || score < bestPair.score) {
+            bestPair = { a, b, sum, absDiff, deliveryCount, sugId, score };
+          }
+        }
+      }
+
+      if (bestPair) {
+        const simPct = computeAmountSimilarityPct(bestPair.sum, targetShortage);
+        suggestions.push({
+          id: bestPair.sugId,
+          reasonType: 'cash_to_pending',
+          reasonText: `Soma de 2 pedidos em Dinheiro (${formatBrlDiagnostic(bestPair.a.amountCents)} + ${formatBrlDiagnostic(bestPair.b.amountCents)} = ${formatBrlDiagnostic(bestPair.sum)}, ${simPct}% semelhante) explica a falta de -${formatBrlDiagnostic(targetShortage)} na gaveta — verifique se eram Pendentes.`,
+          amountCents: bestPair.sum,
+          diffCents: bestPair.sum - targetShortage,
+          similarityPct: simPct,
+          suggestedTargetCategory: 'pendente',
+          drawerTargetCents: -targetShortage,
+          isDelivery: bestPair.deliveryCount > 0,
+          systemIds: [bestPair.a.id, bestPair.b.id],
+          realIds: [],
+          systemItems: [bestPair.a, bestPair.b],
+          realItems: []
+        });
+      }
+    }
+    return;
+  }
+
+  if (cashDrawerDiffCents > minSignal) {
+    const targetSurplus = cashDrawerDiffCents;
+    const missingSet = new Set((missingInBank || []).map((m) => m.id));
+    const surplusPool = systemItems.filter(
+      (s) =>
+        !usedSys.has(s.id) &&
+        !ignoredIds.has(s.id) &&
+        !reservedSugSys.has(s.id) &&
+        Number(s.amountCents || 0) > 0 &&
+        (s.category === 'pendente' || ((s.category === 'pix' || s.category === 'cartao') && missingSet.has(s.id)))
+    );
+
+    const maxAllowedDiff = Math.max(1500, Math.round(targetSurplus * 0.2));
+    const candList = [];
+    for (const s of surplusPool) {
+      const absDiff = Math.abs(s.amountCents - targetSurplus);
+      const similarityPct = computeAmountSimilarityPct(s.amountCents, targetSurplus);
+      const isExact = absDiff <= Math.max(tol, 5);
+      if (!isExact && (similarityPct < 82 || absDiff > maxAllowedDiff)) continue;
+
+      const sugId = `sug_surplus_to_cash_${s.id}`;
+      if (rejectedSuggestionIds.has(sugId)) continue;
+
+      const isDelivery = isDeliveryOrderItem(s);
+      const score = (isExact ? 0 : 1000000) + (s.category === 'pendente' ? 0 : 50000) + (isDelivery ? 0 : 10000) + absDiff;
+      candList.push({ s, absDiff, similarityPct, isExact, isDelivery, sugId, score });
+    }
+
+    candList.sort((a, b) => a.score - b.score);
+    for (const cand of candList.slice(0, 2)) {
+      reservedSugSys.add(cand.s.id);
+      suggestions.push({
+        id: cand.sugId,
+        reasonType: 'surplus_to_cash',
+        reasonText: `Sobra física de +${formatBrlDiagnostic(targetSurplus)} na gaveta • Pedido ${cand.s.category.toUpperCase()} "${cand.s.description}" (${formatBrlDiagnostic(cand.s.amountCents)}, ${cand.similarityPct}% semelhante) pode ter sido recebido em Dinheiro.`,
+        amountCents: cand.s.amountCents,
+        diffCents: cand.s.amountCents - targetSurplus,
+        similarityPct: cand.similarityPct,
+        suggestedTargetCategory: 'dinheiro',
+        drawerTargetCents: targetSurplus,
+        isDelivery: cand.isDelivery,
+        systemIds: [cand.s.id],
+        realIds: [],
+        systemItems: [cand.s],
+        realItems: []
+      });
     }
   }
 }
@@ -941,6 +1275,7 @@ function buildPeriodDiagnostics({
   outflowClassification = {},
   countedCents,
   cashDrawerZeroConfirmed = false,
+  cashRealMirrorCents = null,
   expectedAfterSangriaCents,
   sysSaldoDinheiro,
   sysCartao,
@@ -948,6 +1283,8 @@ function buildPeriodDiagnostics({
   realCartaoCents = 0,
   cardSysCount,
   sysPendentes,
+  basePendentesCents = null,
+  reclassifiedPendDeltaCents = 0,
   overrides
 }) {
   const datesMap = new Map();
@@ -1087,12 +1424,23 @@ function buildPeriodDiagnostics({
     });
   }
 
-  if (txtSum.saldoDinheiroCents > 0 && countedCents === 0 && !cashDrawerZeroConfirmed) {
+  const realCashGapCents =
+    cashRealMirrorCents !== null && cashRealMirrorCents !== undefined
+      ? Math.abs(Number(cashRealMirrorCents) - Number(sysSaldoDinheiro || 0))
+      : Math.max(0, Number(expectedAfterSangriaCents || 0));
+
+  if (
+    txtSum.saldoDinheiroCents > 0 &&
+    countedCents === 0 &&
+    !cashDrawerZeroConfirmed &&
+    expectedAfterSangriaCents > 100 &&
+    realCashGapCents > 100
+  ) {
     validationWarnings.push({
       code: 'cash_drawer_txt_hint',
       severity: 'warning',
       title: 'Saldo em dinheiro na gaveta zerado',
-      message: `A Fita Mov.Caixa (.txt) informa saldo esperado na gaveta de ${formatBrlDiagnostic(txtSum.saldoDinheiroCents)}, enquanto o campo "Dinheiro Contado" está com R$ 0,00 (gerando diferença de -${formatBrlDiagnostic(txtSum.saldoDinheiroCents)}). Confira a contagem física na aba Espelho.`
+      message: `A Fita Mov.Caixa (.txt) informa saldo esperado de ${formatBrlDiagnostic(txtSum.saldoDinheiroCents)} (restando ${formatBrlDiagnostic(expectedAfterSangriaCents)} após sangria), enquanto o campo "Dinheiro Contado" está com R$ 0,00. Confira a contagem física na aba Espelho.`
     });
   } else if (sysSaldoDinheiro > 0 && countedCents === null && relConfFile?.summary?.realRows?.saldo_dinheiro === undefined) {
     validationWarnings.push({
@@ -1177,13 +1525,30 @@ function buildPeriodDiagnostics({
     ? (txtDebtorsSumCents > 0 ? txtDebtorsSumCents : txtNotaPendenteCents)
     : null;
 
-  if (effectiveTxtPendCents !== null && sysPendentes > 0 && Math.abs(effectiveTxtPendCents - sysPendentes) > 5) {
-    validationWarnings.push({
-      code: 'pending_totals_mismatch',
-      severity: 'error',
-      title: `Divergência em Notas Pendentes: PDV (${formatBrlDiagnostic(sysPendentes)}) × TXT (${formatBrlDiagnostic(effectiveTxtPendCents)})`,
-      message: `A soma das Notas Pendentes no Fechamento TXT (${formatBrlDiagnostic(effectiveTxtPendCents)} em ${txtPendDebtors.length} cliente(s)) difere do total de Pendentes do PDV (${formatBrlDiagnostic(sysPendentes)}) em ${formatBrlDiagnostic(Math.abs(effectiveTxtPendCents - sysPendentes))}. Verifique se o arquivo TXT corresponde ao mesmo turno.`
-    });
+  const origPdvPendCents =
+    basePendentesCents !== null && basePendentesCents !== undefined
+      ? Number(basePendentesCents)
+      : (pdvPendCents !== null ? pdvPendCents : Number(sysPendentes || 0));
+
+  if (effectiveTxtPendCents !== null && (sysPendentes > 0 || origPdvPendCents > 0)) {
+    if (Math.abs(effectiveTxtPendCents - origPdvPendCents) <= 5) {
+      if (reclassifiedPendDeltaCents !== 0) {
+        const sign = reclassifiedPendDeltaCents > 0 ? '+' : '-';
+        validationWarnings.push({
+          code: 'pending_totals_adjusted',
+          severity: 'info',
+          title: `Notas Pendentes ajustadas (${sign}${formatBrlDiagnostic(reclassifiedPendDeltaCents)} manual) • Base PDV bate com TXT`,
+          message: `O total original do PDV (${formatBrlDiagnostic(origPdvPendCents)}) bate 100% com a Fita TXT (${formatBrlDiagnostic(effectiveTxtPendCents)}). O total atual de ${formatBrlDiagnostic(sysPendentes)} reflete os ajustes manuais aplicados neste fechamento.`
+        });
+      }
+    } else {
+      validationWarnings.push({
+        code: 'pending_totals_mismatch',
+        severity: 'error',
+        title: `Divergência em Notas Pendentes: PDV (${formatBrlDiagnostic(origPdvPendCents)}) × TXT (${formatBrlDiagnostic(effectiveTxtPendCents)})`,
+        message: `A soma das Notas Pendentes no Fechamento TXT (${formatBrlDiagnostic(effectiveTxtPendCents)} em ${txtPendDebtors.length} cliente(s)) difere do total original de Pendentes do PDV (${formatBrlDiagnostic(origPdvPendCents)}) em ${formatBrlDiagnostic(Math.abs(effectiveTxtPendCents - origPdvPendCents))}. Verifique se o arquivo TXT corresponde ao mesmo turno.`
+      });
+    }
   } else if (pdvPendCents !== null && relPendCents !== null && Math.abs(pdvPendCents - relPendCents) > 5) {
     validationWarnings.push({
       code: 'pending_totals_mismatch',
@@ -1247,7 +1612,7 @@ function buildPeriodDiagnostics({
       txtDebtorsSumCents: txtFile ? txtDebtorsSumCents : null,
       txtDebtorsCount: txtFile ? txtPendDebtors.length : 0,
       pendentesMatchAcrossReports:
-        (effectiveTxtPendCents === null || Math.abs(effectiveTxtPendCents - sysPendentes) <= 5) &&
+        (effectiveTxtPendCents === null || Math.abs(effectiveTxtPendCents - origPdvPendCents) <= 5) &&
         (pdvPendCents === null || relPendCents === null || Math.abs(pdvPendCents - relPendCents) <= 5)
     },
     validationWarnings
@@ -1419,7 +1784,8 @@ export function runCashReconciliation({
           formaPagto: row.formaPagto,
           administradora: row.administradora,
           recebidoEmBranco: Boolean(row.recebidoEmBranco),
-          changeCents: row.changeCents || 0
+          changeCents: row.changeCents || 0,
+          descontoCasaCents: row.descontoCasaCents || 0
         }
       });
     }
@@ -2172,10 +2538,18 @@ export function runCashReconciliation({
     reservedSugReal.add(real.id);
     subset.forEach(s => reservedSugSys.add(s.id));
 
+    const hasDeliveryInSubset = subset.some((s) => isDeliveryOrderItem(s));
+    const hasNonDeliveryInSubset = subset.some((s) => !isDeliveryOrderItem(s));
+    const mixedDeliveryHint =
+      hasDeliveryInSubset && hasNonDeliveryInSubset
+        ? ' (Atenção: combina Delivery + Mesa/Balcão — confira se o Delivery não teve taxa de entrega adicionada no pagamento)'
+        : '';
+
     const suggestionObj = {
       id: sugId,
       reasonType: 'grouped_n_to_1',
-      reasonText: `Soma de ${subset.length} vendas do PDV equivale a 1 entrada em ${real.source.toUpperCase()} (${real.timeStr})`,
+      reasonText: `Soma de ${subset.length} vendas do PDV equivale a 1 entrada em ${real.source.toUpperCase()} (${real.timeStr})${mixedDeliveryHint}`,
+      ...(hasDeliveryInSubset ? { isDelivery: true } : {}),
       amountCents: real.amountCents,
       systemIds: subset.map(s => s.id),
       realIds: [real.id],
@@ -2213,6 +2587,39 @@ export function runCashReconciliation({
     matchedPairs,
     suggestions,
     tol
+  });
+
+  // 4B.1.5 Sugestões de alta semelhança digital (>= 80%, ex.: PIX 84,64 vs 74,71 ou Delivery 38,00 vs 45,00 com taxa)
+  buildHighSimilarityDigitalSuggestions({
+    systemItems,
+    realItems,
+    usedSys,
+    usedReal,
+    ignoredIds,
+    reservedSugSys,
+    reservedSugReal,
+    rejectedSuggestionIds,
+    confirmedSuggestionIds,
+    matchedPairs,
+    suggestions,
+    swapWindowSec: cfg.swapWindowSec
+  });
+
+  // 4B.2 Sugestões de alta semelhança para vendas lançadas em Dinheiro vs Sobras no Banco/Maquininha
+  buildCashSimilarityBankSuggestions({
+    systemItems,
+    realItems,
+    usedSys,
+    usedReal,
+    ignoredIds,
+    reservedSugSys,
+    reservedSugReal,
+    rejectedSuggestionIds,
+    confirmedSuggestionIds,
+    matchedPairs,
+    suggestions,
+    tol,
+    swapWindowSec: cfg.swapWindowSec
   });
 
   // Auditoria operacional consolidada para enriquecer alertas em Faltas sem recebimento
@@ -2340,7 +2747,8 @@ export function runCashReconciliation({
   );
   const sysCartao = Math.max(0, (relSys.cartao ?? pdvTotals.cartao) - ignoredSysByCat.cartao + reclassifiedDeltaByCat.cartao);
   const sysIfood = Math.max(0, (relSys.ifood ?? pdvTotals.ifood) + reclassifiedDeltaByCat.ifood);
-  const sysPendentes = Math.max(0, (relSys.pendentes ?? (pdvFile ? pdvTotals.pendente : (txtSum.notaPendenteCents || 0))) + reclassifiedDeltaByCat.pendente);
+  const basePendentesCents = Math.max(0, relSys.pendentes ?? (pdvFile ? pdvTotals.pendente : (txtSum.notaPendenteCents || 0)));
+  const sysPendentes = Math.max(0, basePendentesCents + reclassifiedDeltaByCat.pendente);
   const sysPix = Math.max(0, (relSys.pix ?? pdvTotals.pix) - ignoredSysByCat.pix + reclassifiedDeltaByCat.pix);
   const sysPagoOnline = relSys.pago_online ?? 0;
   const sysTicket = Math.max(0, (relSys.ticket ?? pdvTotals.ticket) + reclassifiedDeltaByCat.ticket);
@@ -2396,18 +2804,77 @@ export function runCashReconciliation({
   const digitalDiffCents = digitalRealTotal - digitalSystemTotal;
 
   const hasCashRealInformed = countedCents !== null || overrides.saldo_dinheiro !== undefined;
+  const cashMirrorRow = mirrorRows.find((r) => r.key === 'saldo_dinheiro') || null;
+  const cashDrawerDiffCents = cashMirrorRow ? Number(cashMirrorRow.diffCents || 0) : 0;
+
+  // 5B. Sugestões inteligentes de gaveta: pedidos Delivery/PDV em Dinheiro compatíveis com falta (-R$) -> Nota Pendente
+  // ou pedidos Pendentes/Faltas compatíveis com sobra física (+R$) -> Dinheiro
+  buildDrawerCashAnomalySuggestions({
+    systemItems,
+    missingInBank,
+    usedSys,
+    ignoredIds,
+    reservedSugSys,
+    rejectedSuggestionIds,
+    suggestions,
+    hasCashRealInformed,
+    cashDrawerDiffCents,
+    swappedToDigitalCents,
+    tol
+  });
 
   // Score de saúde (0-100): reflete divergência proporcional + pendências abertas sem mascarar faltas
   const baseVolume = Math.max(digitalSystemTotal, systemTotalCents, 1);
   const absFocusDiff = hasCashRealInformed ? Math.abs(confirmedDiffCents) : Math.abs(digitalDiffCents);
   const diffRatio = Math.min(1, absFocusDiff / baseVolume);
-  const smallDiffSugCount = suggestions.filter((s) => s.reasonType === 'small_diff').length;
-  const structuralSugCount = suggestions.length - smallDiffSugCount;
-  const unmatchedPenalty = structuralSugCount * 2.5 + smallDiffSugCount * 1.5 + missingInBank.length * 3 + extraInBank.length * 2;
+  const smallDiffSugCount = suggestions.filter(
+    (s) => s.reasonType === 'small_diff' || s.reasonType === 'high_similarity'
+  ).length;
+  const nonDrawerSugCount = suggestions.filter(
+    (s) => s.reasonType !== 'cash_to_pending' && s.reasonType !== 'surplus_to_cash'
+  ).length;
+  const structuralSugCount = Math.max(0, nonDrawerSugCount - smallDiffSugCount);
+  const diffPenaltyPts = Math.round(diffRatio * 250 * 10) / 10;
+  const structuralSugPenaltyPts = structuralSugCount * 2.5;
+  const smallDiffSugPenaltyPts = smallDiffSugCount * 1.5;
+  const missingPenaltyPts = missingInBank.length * 3;
+  const extraPenaltyPts = extraInBank.length * 2;
+  const unmatchedPenalty =
+    structuralSugPenaltyPts + smallDiffSugPenaltyPts + missingPenaltyPts + extraPenaltyPts;
   const rawScore = Math.max(0, Math.min(100, Math.round((1 - diffRatio * 2.5) * 100 - unmatchedPenalty)));
+  const totalPenaltyPts = Math.max(0, 100 - rawScore);
+  const healthBreakdown = {
+    rawHealthScore: rawScore,
+    diffPenaltyPts,
+    structuralSugCount,
+    structuralSugPenaltyPts,
+    smallDiffSugCount,
+    smallDiffSugPenaltyPts,
+    missingCount: missingInBank.length,
+    missingPenaltyPts,
+    extraCount: extraInBank.length,
+    extraPenaltyPts,
+    absFocusDiffCents: absFocusDiff,
+    baseVolumeCents: baseVolume,
+    totalPenaltyPts
+  };
+
+  const rawForced = manualInputs?.forcedBalanced;
+  const isForcedBalanced = Boolean(rawForced && rawForced.enabled);
+  const forcedBalancedMeta = isForcedBalanced
+    ? {
+        enabled: true,
+        reason: String(rawForced.reason || '').trim() || 'Fechamento concluído com diferença residual assumida',
+        forcedAt: rawForced.forcedAt || undefined,
+        forcedBy: rawForced.forcedBy || undefined,
+        rawHealthScoreBeforeForce: rawScore,
+        rawDiffCents: diffTotalCents
+      }
+    : null;
+  const effectiveHealthScore = isForcedBalanced ? 100 : rawScore;
 
   let status = 'balanced';
-  if (suggestions.length > 0 && absFocusDiff <= Math.max(tol, 100)) {
+  if (nonDrawerSugCount > 0 && absFocusDiff <= Math.max(tol, 100)) {
     status = 'attention';
   } else if (absFocusDiff > Math.max(tol, 100)) {
     const referenceDiff = hasCashRealInformed ? confirmedDiffCents : digitalDiffCents;
@@ -2441,6 +2908,7 @@ export function runCashReconciliation({
     outflowClassification,
     countedCents,
     cashDrawerZeroConfirmed,
+    cashRealMirrorCents,
     expectedAfterSangriaCents,
     sysSaldoDinheiro,
     sysCartao,
@@ -2448,6 +2916,8 @@ export function runCashReconciliation({
     realCartaoCents,
     cardSysCount,
     sysPendentes,
+    basePendentesCents,
+    reclassifiedPendDeltaCents: reclassifiedDeltaByCat.pendente,
     overrides
   });
 
@@ -2466,7 +2936,11 @@ export function runCashReconciliation({
     storeName: txtSum.storeName || summaryTxtFile?.summary?.storeName || '',
     operatorName: txtSum.operatorName || summaryTxtFile?.summary?.operatorName || '',
     status,
-    healthScore: rawScore,
+    healthScore: effectiveHealthScore,
+    rawHealthScore: rawScore,
+    isForcedBalanced,
+    forcedBalanced: forcedBalancedMeta,
+    healthBreakdown,
     systemTotalCents,
     realTotalCents,
     diffTotalCents,

@@ -23,7 +23,8 @@ import {
   TrendingUp,
   User,
   Wallet,
-  X
+  X,
+  Zap
 } from 'lucide-react';
 import { CashSessionRow } from '../../services/cashReconciliationService';
 import {
@@ -31,7 +32,10 @@ import {
   LearnedBankRoutineEntry,
   formatCents
 } from '../../types/cashReconciliation';
-import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
+import {
+  formatDateBr,
+  parseForcedCashMetaFromSession
+} from '../../utils/cashReconciliationServiceHelper.mjs';
 import { normalizeBrazilWhatsappNumber } from '../../utils/cashReportExportHelper.mjs';
 import { DATADIVAS_REPORT_SPECS, BANK_REPORT_SPECS } from '../../utils/cashReportCompleteness.mjs';
 import { CashHealthHistoryCard, HistoricalStatsData } from './CashHealthDashboard';
@@ -734,11 +738,16 @@ export function CashDashboardOverview({
                 const disableCardActions = isActionLocked || Boolean(busySessionId);
                 const operatorLabel = s.operator_name?.trim() || 'Operador não informado';
                 const shiftLabel = s.shift_label?.trim() || 'Diário';
+                const forcedMeta = parseForcedCashMetaFromSession(s);
 
                 return (
                   <div
                     key={s.id}
-                    className="rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-slate-50/75 dark:bg-[#111b21]/85 hover:border-[#00a884]/50 p-4 transition-all space-y-3 min-w-0"
+                    className={`rounded-2xl border p-4 transition-all space-y-3 min-w-0 ${
+                      forcedMeta.isForced
+                        ? 'border-amber-500/60 bg-amber-500/[0.06] dark:bg-[#111b21]/85 hover:border-amber-500'
+                        : 'border-slate-200/80 dark:border-[#2a3942] bg-slate-50/75 dark:bg-[#111b21]/85 hover:border-[#00a884]/50'
+                    }`}
                   >
                     <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 min-w-0">
                       {/* Identidade do Fechamento */}
@@ -761,9 +770,23 @@ export function CashDashboardOverview({
                             {statusMeta.label}
                           </span>
 
-                          <span className="px-2.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] text-[10.5px] font-black tabular-nums whitespace-nowrap">
-                            Saúde {s.health_score}%
-                          </span>
+                          {forcedMeta.isForced ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-amber-500/65 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10.5px] font-black tabular-nums whitespace-nowrap animate-pulse"
+                              title={
+                                forcedMeta.reason
+                                  ? `Forçado a 100% • Motivo: ${forcedMeta.reason}`
+                                  : 'Fechamento forçado a 100% mantendo a diferença real visível'
+                              }
+                            >
+                              <Zap size={10} /> 100% FORÇADO
+                              {forcedMeta.rawScore !== null ? ` (Real ${forcedMeta.rawScore}%)` : ''}
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] text-[10.5px] font-black tabular-nums whitespace-nowrap">
+                              Saúde {s.health_score}%
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600 dark:text-[#aebac1]">

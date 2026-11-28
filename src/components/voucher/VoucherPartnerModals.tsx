@@ -33,6 +33,8 @@ import {
   voucherService,
   WhatsAppInstanceLite
 } from '../../services/voucherService';
+import { BrlCurrencyInput } from '../ui/BrlCurrencyInput';
+import { parseFormattedBrlToReais } from '../../utils/currencyInputMask.mjs';
 
 // =============================================================================
 // 1. MODAL DE COLABORADORES DA EMPRESA PARCEIRA + IMPORTAÇÃO CSV
@@ -397,7 +399,7 @@ export const PartnerRechargeModal: React.FC<PartnerRechargeModalProps> = ({
 
   if (!isOpen || !partner) return null;
 
-  const brlCredit = Math.max(0, Number(valorCredito.replace(',', '.')) || 0);
+  const brlCredit = Math.max(0, parseFormattedBrlToReais(valorCredito));
   const pctDiscount = Math.min(100, Math.max(0, Number(descontoPercent.replace(',', '.')) || 0));
   const netToPay = brlCredit * (1 - pctDiscount / 100);
 
@@ -462,7 +464,7 @@ export const PartnerRechargeModal: React.FC<PartnerRechargeModalProps> = ({
                 type="button"
                 onClick={() => setValorCredito(String(v))}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-                  Number(valorCredito) === v ? 'bg-emerald-500 text-slate-950' : 'bg-white/10 text-slate-300 hover:bg-white/15'
+                  parseFormattedBrlToReais(valorCredito) === v ? 'bg-emerald-500 text-slate-950' : 'bg-white/10 text-slate-300 hover:bg-white/15'
                 }`}
               >
                 +{formatBRL(v)}
@@ -473,13 +475,10 @@ export const PartnerRechargeModal: React.FC<PartnerRechargeModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Crédito Liberado (R$)</label>
-              <input
-                type="number"
-                min="1"
-                step="0.01"
+              <BrlCurrencyInput
                 required
-                value={valorCredito}
-                onChange={(e) => setValorCredito(e.target.value)}
+                valueText={valorCredito}
+                onChangeText={(val) => setValorCredito(val)}
                 className="w-full h-11 px-3.5 rounded-xl bg-slate-900 border border-white/15 text-sm font-semibold text-white focus:outline-none focus:border-emerald-400"
               />
             </div>

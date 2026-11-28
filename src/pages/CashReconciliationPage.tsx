@@ -43,6 +43,8 @@ import {
   buildCashWhatsappSummaryMessage
 } from '../utils/cashReportExportHelper.mjs';
 import {
+  buildDefaultManualInputsPatch,
+  composeCashNotesWithForcedTag,
   computeHistoricalHealthStats,
   extractCashErrorMessage,
   loadActiveCashDraftFromStorage,
@@ -54,7 +56,9 @@ import {
   buildCashDraftSyncSignature,
   shouldPreferLocalDraftOverSession,
   formatDateBr,
-  formatDateHeaderBadge
+  formatDateHeaderBadge,
+  parseForcedCashMetaFromSession,
+  stripForcedCashMarkerTag
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
 import {
@@ -84,8 +88,9 @@ import {
 } from '../utils/cashFilePasswordHelper.mjs';
 import { CashUploadDropzone, UploadedCashFileItem } from '../components/cash-reconciliation/CashUploadDropzone';
 import { CashPasswordPromptModal } from '../components/cash-reconciliation/CashPasswordPromptModal';
-import { CashHealthDashboard, CashHealthHistoryCard } from '../components/cash-reconciliation/CashHealthDashboard';
+import { CashHealthDashboard } from '../components/cash-reconciliation/CashHealthDashboard';
 import { CashGeneralDiffModal, GeneralDiffTabKey } from '../components/cash-reconciliation/CashGeneralDiffModal';
+import { CashHealthRoadmapModal } from '../components/cash-reconciliation/CashHealthRoadmapModal';
 import { CashReconciliationWorkbench } from '../components/cash-reconciliation/CashReconciliationWorkbench';
 import { CashDashboardOverview } from '../components/cash-reconciliation/CashDashboardOverview';
 import { CashWhatsappSendModal } from '../components/cash-reconciliation/CashWhatsappSendModal';
@@ -179,6 +184,7 @@ export default function CashReconciliationPage() {
   const [isDeletingSession, setIsDeletingSession] = useState(false);
   const [selectedMirrorKey, setSelectedMirrorKey] = useState<string | null>(null);
   const [generalDiffTab, setGeneralDiffTab] = useState<GeneralDiffTabKey | null>(null);
+  const [healthRoadmapOpen, setHealthRoadmapOpen] = useState(false);
   const [workbenchResetKey, setWorkbenchResetKey] = useState(0);
   const [autoSaveState, setAutoSaveState] = useState<{
     status: 'idle' | 'pending' | 'saving' | 'saved' | 'local_only' | 'error';
@@ -360,7 +366,12 @@ export default function CashReconciliationPage() {
       diff_cents: Math.round(Number(resObj.diffTotalCents || 0)),
       cash_drawer_counted_cents: inputsObj.cashCountedCents ?? null,
       cash_sangria_cents: Math.round(Number(resObj.cashDrawerSummary?.sangriaCents || 0)),
-      cash_notes: inputsObj.notes || null,
+      cash_notes: composeCashNotesWithForcedTag(
+        inputsObj.notes || '',
+        inputsObj.forcedBalanced,
+        Number(resObj.rawHealthScore ?? resObj.healthScore ?? 0),
+        Number(resObj.diffTotalCents || 0)
+      ),
       reconciled_summary: {},
       closed_at: closedAt,
       created_at: savedAt,
@@ -597,6 +608,22 @@ export default function CashReconciliationPage() {
     setHydratedTenantId(tenantId);
   }, [tenantId, resetAutoSaveTracking]);
 
+  // Preenche por padrão Só Sangria (R$ 0,00) na gaveta e Pendentes REAL = SISTEMA em conferências abertas
+  useEffect(() => {
+    if (!tenantId || hydratedTenantId !== tenantId) return;
+    if (!reconciliationResult || isActiveSessionClosed) return;
+    const defaultPatch = buildDefaultManualInputsPatch(manualInputs, reconciliationResult, {
+      isClosedSession: isActiveSessionClosed
+    });
+    if (!defaultPatch) return;
+    setManualInputs((prev) => {
+      const nextPatch = buildDefaultManualInputsPatch(prev, reconciliationResult, {
+        isClosedSession: isActiveSessionClosed
+      });
+      return nextPatch ? { ...prev, ...nextPatch } : prev;
+    });
+  }, [tenantId, hydratedTenantId, isActiveSessionClosed, reconciliationResult, manualInputs]);
+
   // Auto-save contínuo (local imediato com fallback + nuvem Supabase com debounce) sempre que qualquer dado muda
   useEffect(() => {
     if (!tenantId || typeof window === 'undefined') return;
@@ -716,7 +743,10 @@ export default function CashReconciliationPage() {
       parsed: pf
     }));
     const restoredInputs: CashManualInputs =
-      snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' };
+      snap.manualInputs || {
+        cashCountedCents: session.cash_drawer_counted_cents,
+        notes: stripForcedCashMarkerTag(session.cash_notes || '')
+      };
     const restoredResolutions: CashResolutionAction[] = snap.manualResolutions || [];
     const restoredAi: CashAiAnalysis | null = session.ai_last_analysis || null;
 
@@ -1171,6 +1201,7 @@ export default function CashReconciliationPage() {
     setAiAnalysis(null);
     setSelectedMirrorKey(null);
     setGeneralDiffTab(null);
+    setHealthRoadmapOpen(false);
     setAutoSaveState({ status: 'idle', lastSavedAt: null });
     setWorkbenchResetKey((k) => k + 1);
   };
@@ -1417,7 +1448,12 @@ export default function CashReconciliationPage() {
       diff_cents: reconciliationResult.diffTotalCents ?? 0,
       cash_drawer_counted_cents: manualInputs.cashCountedCents ?? null,
       cash_sangria_cents: reconciliationResult.cashDrawerSummary?.sangriaCents ?? 0,
-      cash_notes: manualInputs.notes || null,
+      cash_notes: composeCashNotesWithForcedTag(
+        manualInputs.notes || '',
+        manualInputs.forcedBalanced,
+        Number(reconciliationResult.rawHealthScore ?? reconciliationResult.healthScore ?? 0),
+        Number(reconciliationResult.diffTotalCents || 0)
+      ),
       reconciled_summary: {},
       closed_at: isActiveSessionClosed ? new Date().toISOString() : null
     };
@@ -1843,10 +1879,11 @@ export default function CashReconciliationPage() {
                       ? [s.operator_name?.trim(), s.shift_label?.trim()].filter(Boolean).join(' / ')
                       : '';
                     const duplicateMeta = [timeHm, operatorOrShift].filter(Boolean).join(' • ');
+                    const isForced = parseForcedCashMetaFromSession(s).isForced;
                     return (
                       <option key={s.id} value={s.id} className="dark:bg-[#202c33]">
                         {formatDateBr(s.reference_date)}
-                        {duplicateMeta ? ` (${duplicateMeta})` : ''} • {s.health_score}% • {formatCents(s.diff_cents)}
+                        {duplicateMeta ? ` (${duplicateMeta})` : ''} • {s.health_score}%{isForced ? ' ⚡FORÇADO' : ''} • {formatCents(s.diff_cents)}
                         {!s.closed_at ? ' (Rascunho)' : ''}
                       </option>
                     );
@@ -2046,6 +2083,10 @@ export default function CashReconciliationPage() {
                 reportCompleteness={reportCompleteness}
                 routineProfile={routineProfile}
                 sourcePeriodStats={reconciliationResult?.periodDiagnostics?.sourcePeriodStats}
+                wrongDayWarnings={reconciliationResult?.periodDiagnostics?.validationWarnings?.filter(
+                  (w) => w.code === 'wrong_day_real_file' || w.code === 'wrong_day_system_file'
+                )}
+                quarantinedSystemFiles={reconciliationResult?.periodDiagnostics?.quarantinedSystemFiles}
                 openChecklistNonce={openChecklistNonce}
                 onAddFiles={handleAddFiles}
                 onUnlockPasswordFile={handleUnlockPasswordFile}
@@ -2076,15 +2117,6 @@ export default function CashReconciliationPage() {
                     </p>
                   </div>
                 </div>
-
-                {historicalStats.totalSessions > 0 && (
-                  <CashHealthHistoryCard
-                    historicalStats={historicalStats}
-                    sessions={sessions}
-                    onSelectSession={(sessionId) => void handleLoadSession(sessionId)}
-                    onDeleteSession={(session) => setDeleteTargetSession(session)}
-                  />
-                )}
               </div>
             ) : (
               <div className="space-y-5">
@@ -2138,6 +2170,26 @@ export default function CashReconciliationPage() {
                       'success'
                     );
                   };
+                  const onReclassifySystemItemsAction = (
+                    systemIds: string[],
+                    targetCategory: 'dinheiro' | 'cartao' | 'pix' | 'pendente'
+                  ) => {
+                    const idSet = new Set(systemIds);
+                    if (idSet.size === 0) return;
+                    setManualResolutions((prev) => {
+                      const withoutPrior = prev.filter(
+                        (r) => !(r.action === 'reclassify_system' && (r.systemIds || []).some((sid) => idSet.has(sid)))
+                      );
+                      return [
+                        ...withoutPrior,
+                        { action: 'reclassify_system', systemIds, targetCategory }
+                      ];
+                    });
+                    notifyToast(
+                      `${systemIds.length} lançamento(s) ajustado(s) para ${targetCategory.toUpperCase()}. Totais atualizados.`,
+                      'success'
+                    );
+                  };
                   const onUndoLastResolutionAction = () => {
                     setManualResolutions((prev) => {
                       if (prev.length === 0) return prev;
@@ -2150,12 +2202,9 @@ export default function CashReconciliationPage() {
                     <>
                       <CashHealthDashboard
                         result={reconciliationResult}
-                        historicalStats={historicalStats}
-                        sessions={sessions}
-                        onSelectSession={(sessionId) => void handleLoadSession(sessionId)}
-                        onDeleteSession={(session) => setDeleteTargetSession(session)}
                         onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
                         onOpenGeneralDiff={(tab) => setGeneralDiffTab(tab || 'tabela')}
+                        onOpenHealthRoadmap={() => setHealthRoadmapOpen(true)}
                         onOpenChecklist={() => {
                           setOpenChecklistNonce((n) => n + 1);
                           dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2176,6 +2225,7 @@ export default function CashReconciliationPage() {
                         onManualLink={onManualLinkAction}
                         onIgnoreItem={onIgnoreItemAction}
                         onReclassifySystemItem={onReclassifySystemItemAction}
+                        onReclassifySystemItems={onReclassifySystemItemsAction}
                         manualResolutionsCount={manualResolutions.length}
                         onUndoLastResolution={onUndoLastResolutionAction}
                   rules={rules}
@@ -2231,9 +2281,43 @@ export default function CashReconciliationPage() {
                           onRejectSuggestion={onRejectSuggestionAction}
                           onManualLink={onManualLinkAction}
                           onIgnoreItem={onIgnoreItemAction}
+                          onReclassifySystemItem={onReclassifySystemItemAction}
+                          onReclassifySystemItems={onReclassifySystemItemsAction}
                           onUndoLastResolution={onUndoLastResolutionAction}
                           onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
                           onClose={() => setGeneralDiffTab(null)}
+                        />
+                      )}
+
+                      {healthRoadmapOpen && (
+                        <CashHealthRoadmapModal
+                          result={reconciliationResult}
+                          manualInputs={manualInputs}
+                          manualResolutions={manualResolutions}
+                          onUpdateManualInputs={(patch) => {
+                            setManualInputs((prev) => ({ ...prev, ...patch }));
+                            if (patch.forcedBalanced !== undefined) {
+                              notifyToast(
+                                patch.forcedBalanced?.enabled
+                                  ? 'Caixa marcado como 100% Forçado! Sobra/Falta real preservada com aviso pulsante.'
+                                  : 'Forçamento a 100% revertido para a saúde técnica real.',
+                                patch.forcedBalanced?.enabled ? 'warning' : 'info'
+                              );
+                            }
+                          }}
+                          onConfirmSuggestion={onConfirmSuggestionAction}
+                          onRejectSuggestion={onRejectSuggestionAction}
+                          onManualLink={onManualLinkAction}
+                          onIgnoreItem={onIgnoreItemAction}
+                          onReclassifySystemItem={onReclassifySystemItemAction}
+                          onReclassifySystemItems={onReclassifySystemItemsAction}
+                          onUndoLastResolution={onUndoLastResolutionAction}
+                          onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                          onOpenChecklist={() => {
+                            setOpenChecklistNonce((n) => n + 1);
+                            dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }}
+                          onClose={() => setHealthRoadmapOpen(false)}
                         />
                       )}
                     </>

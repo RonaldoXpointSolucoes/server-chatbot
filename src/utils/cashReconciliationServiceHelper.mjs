@@ -100,6 +100,79 @@ export function isMissingCashTableError(error) {
   );
 }
 
+const FORCED_MARKER_RE = /\s*\[FOR[ÇC]ADO 100%([^\]]*)\]/gi;
+
+export function stripForcedCashMarkerTag(rawNotes) {
+  return String(rawNotes || '')
+    .replace(FORCED_MARKER_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function buildForcedCashMarkerTag(forcedBalanced, rawScore = 0, diffCents = 0) {
+  if (!forcedBalanced || !forcedBalanced.enabled) return '';
+  const cleanReason = String(forcedBalanced.reason || '')
+    .replace(/[\[\]|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+  const safeScore = Math.max(0, Math.min(100, Math.round(Number(forcedBalanced.rawHealthScoreBeforeForce ?? rawScore ?? 0))));
+  const safeDiff = Math.round(Number(forcedBalanced.rawDiffCents ?? diffCents ?? 0));
+  return `[FORÇADO 100%|real:${safeScore}|dif:${safeDiff}${cleanReason ? `|motivo:${cleanReason}` : ''}]`;
+}
+
+export function composeCashNotesWithForcedTag(notes, forcedBalanced, rawScore = 0, diffCents = 0) {
+  const cleanUserNotes = stripForcedCashMarkerTag(notes || '');
+  const tag = buildForcedCashMarkerTag(forcedBalanced, rawScore, diffCents);
+  return [cleanUserNotes, tag].filter(Boolean).join(' ').trim() || null;
+}
+
+export function parseForcedCashMetaFromSession(sessionRow = {}, manualInputs = null) {
+  const inputsForced = manualInputs?.forcedBalanced || sessionRow?.reconciled_summary?.manualInputs?.forcedBalanced;
+  if (inputsForced && inputsForced.enabled) {
+    return {
+      isForced: true,
+      rawScore: Math.max(0, Math.min(100, Math.round(Number(inputsForced.rawHealthScoreBeforeForce ?? 0)))),
+      diffCents: Math.round(Number(inputsForced.rawDiffCents ?? sessionRow?.diff_cents ?? 0)),
+      reason: String(inputsForced.reason || '').trim()
+    };
+  }
+
+  const rawNotes = String(sessionRow?.cash_notes || '');
+  const markerMatch = rawNotes.match(/\[FOR[ÇC]ADO 100%([^\]]*)\]/i);
+  if (markerMatch) {
+    const inner = String(markerMatch[1] || '');
+    const realMatch = inner.match(/\|real:(\d+)/i);
+    const difMatch = inner.match(/\|dif:(-?\d+)/i);
+    const reasonMatch = inner.match(/\|motivo:([^|\]]+)/i);
+    return {
+      isForced: true,
+      rawScore: realMatch ? Number(realMatch[1]) : null,
+      diffCents: difMatch ? Number(difMatch[1]) : Math.round(Number(sessionRow?.diff_cents || 0)),
+      reason: reasonMatch ? String(reasonMatch[1]).trim() : ''
+    };
+  }
+
+  const score = Number(sessionRow?.health_score ?? 0);
+  const diffCents = Math.round(Number(sessionRow?.diff_cents ?? 0));
+  const status = String(sessionRow?.status || '');
+  if (score >= 100 && (Math.abs(diffCents) > 100 || (status && status !== 'balanced' && status !== 'draft'))) {
+    return {
+      isForced: true,
+      rawScore: null,
+      diffCents,
+      reason: ''
+    };
+  }
+
+  return {
+    isForced: false,
+    rawScore: score,
+    diffCents,
+    reason: ''
+  };
+}
+
 export function buildSessionPersistencePayload({
   tenantId,
   userEmail = '',
@@ -123,6 +196,19 @@ export function buildSessionPersistencePayload({
     .filter(f => f && f.status === 'ok')
     .map(f => compactParsedFileForClosingPeriod(f, result?.referenceDate, result?.periodDiagnostics));
 
+  const forcedMeta = manualInputs?.forcedBalanced?.enabled
+    ? manualInputs.forcedBalanced
+    : result?.forcedBalanced?.enabled
+      ? result.forcedBalanced
+      : null;
+  const rawScoreBeforeForce = Number(result?.rawHealthScore ?? result?.healthBreakdown?.rawHealthScore ?? result?.healthScore ?? 0);
+  const persistedCashNotes = composeCashNotesWithForcedTag(
+    manualInputs.notes || '',
+    forcedMeta,
+    rawScoreBeforeForce,
+    result?.diffTotalCents ?? 0
+  );
+
   const sessionPayload = {
     tenant_id: cleanTenantId,
     reference_date: result.referenceDate || new Date().toISOString().slice(0, 10),
@@ -138,7 +224,7 @@ export function buildSessionPersistencePayload({
       ? Math.round(Number(manualInputs.cashCountedCents))
       : null,
     cash_sangria_cents: Math.round(Number(result.cashDrawerSummary?.sangriaCents || 0)),
-    cash_notes: manualInputs.notes || null,
+    cash_notes: persistedCashNotes,
     reconciled_summary: {
       mirrorRows: result.mirrorRows || [],
       cashDrawerSummary: result.cashDrawerSummary || {},
@@ -236,6 +322,7 @@ export function computeHistoricalHealthStats(sessions = []) {
     return {
       totalSessions: 0,
       balancedCount: 0,
+      forcedBalancedCount: 0,
       balancedRatePct: 0,
       avgHealthScore: 0,
       totalShortageCents: 0,
@@ -245,12 +332,14 @@ export function computeHistoricalHealthStats(sessions = []) {
   }
 
   let balancedCount = 0;
+  let forcedBalancedCount = 0;
   let scoreSum = 0;
   let totalShortageCents = 0;
   let totalSurplusCents = 0;
 
   for (const s of valid) {
     if (s.status === 'balanced') balancedCount++;
+    if (parseForcedCashMetaFromSession(s).isForced) forcedBalancedCount++;
     scoreSum += Number(s.health_score || 0);
     const diff = Number(s.diff_cents || 0);
     if (diff < 0) totalShortageCents += Math.abs(diff);
@@ -267,6 +356,7 @@ export function computeHistoricalHealthStats(sessions = []) {
           : null;
       const createdAt = String(s.created_at || s.createdAt || '');
       const isDraft = Boolean(s.status === 'draft' || !s.closed_at);
+      const forcedMeta = parseForcedCashMetaFromSession(s);
 
       return {
         id: s.id,
@@ -279,7 +369,10 @@ export function computeHistoricalHealthStats(sessions = []) {
         shiftLabel: shiftRaw || 'Diário',
         operatorName,
         createdAt,
-        isDraft
+        isDraft,
+        isForcedBalanced: forcedMeta.isForced,
+        forcedReason: forcedMeta.reason || '',
+        rawScoreBeforeForce: forcedMeta.rawScore
       };
     })
     .sort((a, b) => {
@@ -293,6 +386,7 @@ export function computeHistoricalHealthStats(sessions = []) {
   return {
     totalSessions: valid.length,
     balancedCount,
+    forcedBalancedCount,
     balancedRatePct: Math.round((balancedCount / valid.length) * 100),
     avgHealthScore: Math.round(scoreSum / valid.length),
     totalShortageCents,
@@ -338,6 +432,7 @@ export function buildMirrorRowDetails(result = {}, rowKey = '') {
 
   const suggestions = (result.suggestions || []).filter(
     sug =>
+      (sug.suggestedTargetCategory && catSet.has(sug.suggestedTargetCategory)) ||
       (sug.systemItems || []).some(s => catSet.has(s.category)) ||
       (sug.realItems || []).some(r => catSet.has(r.category))
   );
@@ -713,10 +808,274 @@ export function pickMostRecentOpenDraftSession(sessions = []) {
   return open[0];
 }
 
+function formatSourceLabel(rawSource) {
+  const s = String(rawSource || '').trim().toUpperCase();
+  if (s === 'C6PAY' || s === 'C6_PAY') return 'C6 Pay';
+  if (s === 'REDE') return 'Rede';
+  if (s === 'STONE') return 'Stone';
+  if (s === 'PAGSEGURO') return 'PagSeguro';
+  if (s === 'GETNET') return 'Getnet';
+  if (s === 'CIELO') return 'Cielo';
+  return s || 'Adquirente';
+}
+
+function normalizeCardModality(item) {
+  const sub = String(item?.subCategory || '').toUpperCase();
+  const desc = String(item?.description || '').toUpperCase();
+  if (sub.includes('DEB') || desc.includes('DEBIT')) return 'DEBITO';
+  if (sub.includes('VOUCH') || sub.includes('TICK') || desc.includes('VOUCH') || desc.includes('ALIM') || desc.includes('REFEIC')) {
+    return 'VOUCHER';
+  }
+  return 'CREDITO';
+}
+
+function normalizeCardBrand(item) {
+  const raw = String(item?.metadata?.bandeira || '').trim();
+  let candidate = raw;
+  if (!candidate) {
+    const desc = String(item?.description || '').trim();
+    const cleaned = desc
+      .replace(/\b(rede|c6\s*pay|c6pay|credito|crédito|debito|débito|voucher|pix|pos)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    candidate = cleaned;
+  }
+  const upper = candidate.toUpperCase();
+  if (!upper) return '';
+  if (upper.includes('MASTER')) return 'MASTERCARD';
+  if (upper.includes('VISA')) return 'VISA';
+  if (upper.includes('ELO')) return 'ELO';
+  if (upper.includes('AMEX') || upper.includes('AMERICAN')) return 'AMEX';
+  if (upper.includes('HIPER')) return 'HIPERCARD';
+  return upper;
+}
+
+/**
+ * Compara taxas MDR entre todas as adquirentes/bancos presentes no fechamento,
+ * apontando a diferença em pontos percentuais e a economia potencial em R$ caso
+ * as transações fossem roteadas para a maquininha mais econômica (por bandeira/modalidade e média global).
+ */
+export function buildAcquirerFeeComparison(cardItems = []) {
+  const validItems = (Array.isArray(cardItems) ? cardItems : []).filter(
+    (it) => it && Number(it.amountCents || 0) > 0 && (it.category === 'cartao' || Number(it.feeCents || 0) > 0)
+  );
+
+  const bySourceMap = new Map();
+  for (const it of validItems) {
+    const src = String(it.source || 'outro').trim().toUpperCase();
+    const cur = bySourceMap.get(src) || {
+      source: src,
+      label: formatSourceLabel(src),
+      count: 0,
+      grossCents: 0,
+      feeCents: 0,
+      netCents: 0,
+      creditCount: 0,
+      creditGrossCents: 0,
+      creditFeeCents: 0,
+      debitCount: 0,
+      debitGrossCents: 0,
+      debitFeeCents: 0
+    };
+    const gross = Number(it.amountCents || 0);
+    const fee = Number(it.feeCents || 0);
+    const net = Number(it.netAmountCents ?? Math.max(0, gross - fee));
+    const modality = normalizeCardModality(it);
+
+    cur.count += 1;
+    cur.grossCents += gross;
+    cur.feeCents += fee;
+    cur.netCents += net;
+    if (modality === 'DEBITO') {
+      cur.debitCount += 1;
+      cur.debitGrossCents += gross;
+      cur.debitFeeCents += fee;
+    } else if (modality === 'CREDITO') {
+      cur.creditCount += 1;
+      cur.creditGrossCents += gross;
+      cur.creditFeeCents += fee;
+    }
+    bySourceMap.set(src, cur);
+  }
+
+  const sources = Array.from(bySourceMap.values())
+    .map((s) => ({
+      ...s,
+      effectiveRatePct: s.grossCents > 0 ? Number(((s.feeCents / s.grossCents) * 100).toFixed(2)) : 0,
+      creditRatePct: s.creditGrossCents > 0 ? Number(((s.creditFeeCents / s.creditGrossCents) * 100).toFixed(2)) : null,
+      debitRatePct: s.debitGrossCents > 0 ? Number(((s.debitFeeCents / s.debitGrossCents) * 100).toFixed(2)) : null
+    }))
+    .sort((a, b) => a.effectiveRatePct - b.effectiveRatePct || b.grossCents - a.grossCents);
+
+  const hasMultipleSources = sources.filter((s) => s.feeCents > 0 || s.grossCents > 0).length >= 2;
+  const cheapestSource = sources[0] || null;
+  const mostExpensiveSource = sources.length >= 2 ? sources[sources.length - 1] : null;
+  const rateSpreadPctPoints =
+    hasMultipleSources && cheapestSource && mostExpensiveSource
+      ? Number(Math.max(0, mostExpensiveSource.effectiveRatePct - cheapestSource.effectiveRatePct).toFixed(2))
+      : 0;
+
+  let globalAverageSavingsCents = 0;
+  if (hasMultipleSources && cheapestSource && cheapestSource.grossCents > 0) {
+    const cheapestExactRate = cheapestSource.feeCents / cheapestSource.grossCents;
+    for (const s of sources.slice(1)) {
+      const hypotheticalFee = Math.round(s.grossCents * cheapestExactRate);
+      if (s.feeCents > hypotheticalFee) {
+        globalAverageSavingsCents += s.feeCents - hypotheticalFee;
+      }
+    }
+  }
+
+  // Comparação justa por Modalidade + Bandeira (ex.: CREDITO MASTERCARD Rede vs C6 Pay)
+  const brandGroupMap = new Map();
+  for (const it of validItems) {
+    const modality = normalizeCardModality(it);
+    const brand = normalizeCardBrand(it);
+    if (!brand) continue;
+    const key = `${modality}__${brand}`;
+    const src = String(it.source || 'outro').trim().toUpperCase();
+    const group = brandGroupMap.get(key) || { key, modality, brand, matchScope: 'brand', label: `${modality} ${brand}`, items: [], bySource: new Map() };
+    group.items.push(it);
+    const cur = group.bySource.get(src) || { source: src, label: formatSourceLabel(src), count: 0, grossCents: 0, feeCents: 0 };
+    cur.count += 1;
+    cur.grossCents += Number(it.amountCents || 0);
+    cur.feeCents += Number(it.feeCents || 0);
+    group.bySource.set(src, cur);
+    brandGroupMap.set(key, group);
+  }
+
+  const profileComparisons = [];
+  const coveredItemIds = new Set();
+
+  const evaluateComparisonGroup = (group) => {
+    if (group.bySource.size < 2) return null;
+    const entries = Array.from(group.bySource.values())
+      .filter((e) => e.grossCents > 0 && e.feeCents > 0)
+      .map((e) => ({
+        ...e,
+        ratePct: Number(((e.feeCents / e.grossCents) * 100).toFixed(2)),
+        exactRate: e.feeCents / e.grossCents
+      }))
+      .sort((a, b) => a.exactRate - b.exactRate);
+
+    if (entries.length < 2) return null;
+    const winner = entries[0];
+    const loser = entries[entries.length - 1];
+    const spreadPctPoints = Number(Math.max(0, loser.ratePct - winner.ratePct).toFixed(2));
+    let potentialSavingsCents = 0;
+
+    const enrichedEntries = entries.map((e, idx) => {
+      const wouldPayCents = Math.round(e.grossCents * winner.exactRate);
+      const excessFeeCents = idx === 0 ? 0 : Math.max(0, e.feeCents - wouldPayCents);
+      potentialSavingsCents += excessFeeCents;
+      return {
+        source: e.source,
+        label: e.label,
+        count: e.count,
+        grossCents: e.grossCents,
+        feeCents: e.feeCents,
+        ratePct: e.ratePct,
+        excessFeeCents
+      };
+    });
+
+    if (spreadPctPoints <= 0 && potentialSavingsCents <= 0) return null;
+
+    return {
+      key: group.key,
+      label: group.label,
+      modality: group.modality,
+      brand: group.brand || '',
+      matchScope: group.matchScope,
+      cheapestSource: winner.source,
+      cheapestLabel: winner.label,
+      cheapestRatePct: winner.ratePct,
+      mostExpensiveSource: loser.source,
+      mostExpensiveLabel: loser.label,
+      mostExpensiveRatePct: loser.ratePct,
+      spreadPctPoints,
+      potentialSavingsCents,
+      entries: enrichedEntries
+    };
+  };
+
+  for (const group of brandGroupMap.values()) {
+    const evalRes = evaluateComparisonGroup(group);
+    if (evalRes) {
+      profileComparisons.push(evalRes);
+      for (const it of group.items) {
+        if (it?.id) coveredItemIds.add(it.id);
+      }
+    }
+  }
+
+  // Fallback por modalidade para transações cuja bandeira só apareceu em uma adquirente
+  const modalityFallbackMap = new Map();
+  for (const it of validItems) {
+    if (it?.id && coveredItemIds.has(it.id)) continue;
+    const modality = normalizeCardModality(it);
+    const src = String(it.source || 'outro').trim().toUpperCase();
+    const group = modalityFallbackMap.get(modality) || {
+      key: `MOD__${modality}`,
+      modality,
+      brand: 'Demais bandeiras',
+      matchScope: 'modality',
+      label: `${modality} (demais bandeiras)`,
+      items: [],
+      bySource: new Map()
+    };
+    group.items.push(it);
+    const cur = group.bySource.get(src) || { source: src, label: formatSourceLabel(src), count: 0, grossCents: 0, feeCents: 0 };
+    cur.count += 1;
+    cur.grossCents += Number(it.amountCents || 0);
+    cur.feeCents += Number(it.feeCents || 0);
+    group.bySource.set(src, cur);
+    modalityFallbackMap.set(modality, group);
+  }
+  for (const group of modalityFallbackMap.values()) {
+    const evalRes = evaluateComparisonGroup(group);
+    if (evalRes) profileComparisons.push(evalRes);
+  }
+
+  profileComparisons.sort((a, b) => b.potentialSavingsCents - a.potentialSavingsCents);
+
+  const optimalRoutingSavingsCents = profileComparisons.reduce((s, p) => s + Number(p.potentialSavingsCents || 0), 0);
+  const headlineSavingsCents = optimalRoutingSavingsCents > 0 ? optimalRoutingSavingsCents : globalAverageSavingsCents;
+  const monthlyProjectedSavingsCents = headlineSavingsCents * 30;
+
+  const recommendations = profileComparisons
+    .filter((p) => p.potentialSavingsCents > 0)
+    .map(
+      (p) =>
+        `${p.label}: use ${p.cheapestLabel} (${p.cheapestRatePct.toFixed(2).replace('.', ',')}%) em vez de ${p.mostExpensiveLabel} (${p.mostExpensiveRatePct.toFixed(2).replace('.', ',')}%) • diferença de ${p.spreadPctPoints.toFixed(2).replace('.', ',')} p.p.`
+    );
+
+  if (recommendations.length === 0 && hasMultipleSources && globalAverageSavingsCents > 0 && cheapestSource && mostExpensiveSource) {
+    recommendations.push(
+      `Taxa média global: ${cheapestSource.label} (${cheapestSource.effectiveRatePct.toFixed(2).replace('.', ',')}%) vs ${mostExpensiveSource.label} (${mostExpensiveSource.effectiveRatePct.toFixed(2).replace('.', ',')}%) • diferença de ${rateSpreadPctPoints.toFixed(2).replace('.', ',')} p.p.`
+    );
+  }
+
+  return {
+    hasMultipleSources,
+    sources,
+    cheapestSource,
+    mostExpensiveSource,
+    rateSpreadPctPoints,
+    profileComparisons,
+    optimalRoutingSavingsCents,
+    globalAverageSavingsCents,
+    headlineSavingsCents,
+    monthlyProjectedSavingsCents,
+    recommendations
+  };
+}
+
 export function buildHealthMetricDetail(result = {}, metricKey = '') {
   const metrics = result.financialMetrics || {};
   const audit = result.auditInsights || {};
   const realItems = Array.isArray(result.realItems) ? result.realItems : [];
+  const systemItems = Array.isArray(result.systemItems) ? result.systemItems : [];
   const drawer = result.cashDrawerSummary || {};
   const getMirror = (k) => (result.mirrorRows || []).find(r => r.key === k) || { systemCents: 0, realCents: 0, diffCents: 0 };
 
@@ -724,6 +1083,7 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
     const feeItems = realItems
       .filter(it => Number(it.feeCents || 0) > 0)
       .sort((a, b) => Number(b.feeCents || 0) - Number(a.feeCents || 0));
+    const cardItemsForComp = realItems.filter(it => it.category === 'cartao' || Number(it.feeCents || 0) > 0);
     const bySource = new Map();
     for (const it of feeItems) {
       const key = `${it.source || 'outro'}`;
@@ -734,11 +1094,20 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
       cur.netCents += Number(it.netAmountCents ?? it.amountCents ?? 0);
       bySource.set(key, cur);
     }
+    const comparison = buildAcquirerFeeComparison(cardItemsForComp);
+    const totalCardGrossCents = feeItems.reduce((s, it) => s + Number(it.amountCents || 0), 0);
+    const totalFeeCents = Number(metrics.totalMdrFeeCents || 0);
+    const avgEffectiveRatePct =
+      totalCardGrossCents > 0 ? Number(((totalFeeCents / totalCardGrossCents) * 100).toFixed(2)) : 0;
     return {
       metricKey,
-      totalFeeCents: Number(metrics.totalMdrFeeCents || 0),
+      totalFeeCents,
+      totalCardGrossCents,
+      totalCardNetCents: feeItems.reduce((s, it) => s + Number(it.netAmountCents ?? (Number(it.amountCents || 0) - Number(it.feeCents || 0))), 0),
+      avgEffectiveRatePct,
       items: feeItems,
-      bySource: Array.from(bySource.values())
+      bySource: Array.from(bySource.values()),
+      comparison
     };
   }
 
@@ -747,52 +1116,245 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
     for (const it of realItems) {
       const key = `${it.source || 'outro'}_${it.category || 'outros'}`;
       const label = `${String(it.source || '').toUpperCase()} (${String(it.category || '').toUpperCase()})`;
-      const cur = channelMap.get(key) || { key, label, count: 0, grossCents: 0, feeCents: 0, netCents: 0 };
+      const cur = channelMap.get(key) || { key, label, source: String(it.source || '').toUpperCase(), category: it.category || 'outros', count: 0, grossCents: 0, feeCents: 0, netCents: 0 };
       cur.count += 1;
       cur.grossCents += Number(it.amountCents || 0);
       cur.feeCents += Number(it.feeCents || 0);
       cur.netCents += Number(it.netAmountCents ?? it.amountCents ?? 0);
       channelMap.set(key, cur);
     }
+    const totalDigitalGrossCents = realItems.reduce((s, it) => s + Number(it.amountCents || 0), 0);
+    const channels = Array.from(channelMap.values()).map((ch) => ({
+      ...ch,
+      effectiveRatePct: ch.grossCents > 0 ? Number(((ch.feeCents / ch.grossCents) * 100).toFixed(2)) : 0,
+      grossSharePct: totalDigitalGrossCents > 0 ? Math.round((ch.grossCents / totalDigitalGrossCents) * 100) : 0
+    }));
+    const comparison = buildAcquirerFeeComparison(realItems.filter((it) => it.category === 'cartao' || Number(it.feeCents || 0) > 0));
     return {
       metricKey,
       totalNetDigitalCents: Number(metrics.totalNetDigitalCents || 0),
+      totalDigitalGrossCents,
       totalFeeCents: Number(metrics.totalMdrFeeCents || 0),
-      channels: Array.from(channelMap.values())
+      channels,
+      comparison
     };
   }
 
   if (metricKey === 'cancelled') {
     const detailed = Array.isArray(audit.cancelledDetails) ? audit.cancelledDetails : [];
+    const fallbackItems = Array.isArray(metrics.cancelledItems) ? metrics.cancelledItems : [];
+    const cancelledCents = Number(metrics.cancelledCents || 0);
+    const totalSalesRef = Math.max(Number(result.systemTotalCents || 0), 1);
+    const impactPctOfSales = Number(((cancelledCents / totalSalesRef) * 100).toFixed(2));
+
+    const byReasonMap = new Map();
+    const byWaiterMap = new Map();
+    const byGroupMap = new Map();
+
+    for (const it of detailed) {
+      const reasonLabel = (it.reason && it.reason !== '-') ? it.reason : (it.reasonDetails || 'Motivo não especificado');
+      const rKey = reasonLabel.toUpperCase();
+      const rCur = byReasonMap.get(rKey) || { reason: reasonLabel, count: 0, totalCents: 0, waiters: new Set() };
+      rCur.count += 1;
+      rCur.totalCents += Number(it.totalCents || 0);
+      if (it.waiter && it.waiter !== '-') rCur.waiters.add(it.waiter);
+      byReasonMap.set(rKey, rCur);
+
+      const waiterName = String(it.waiter || it.operator || 'Não informado').trim() || 'Não informado';
+      const wKey = waiterName.toUpperCase();
+      const wCur = byWaiterMap.get(wKey) || { name: waiterName, count: 0, totalCents: 0, tables: new Set() };
+      wCur.count += 1;
+      wCur.totalCents += Number(it.totalCents || 0);
+      if (it.table) wCur.tables.add(it.table);
+      byWaiterMap.set(wKey, wCur);
+
+      const grpName = String(it.group || 'OUTROS').trim() || 'OUTROS';
+      const gCur = byGroupMap.get(grpName) || { group: grpName, count: 0, totalCents: 0 };
+      gCur.count += 1;
+      gCur.totalCents += Number(it.totalCents || 0);
+      byGroupMap.set(grpName, gCur);
+    }
+
+    const byReason = Array.from(byReasonMap.values())
+      .map((x) => ({
+        reason: x.reason,
+        count: x.count,
+        totalCents: x.totalCents,
+        waiters: Array.from(x.waiters)
+      }))
+      .sort((a, b) => b.totalCents - a.totalCents || b.count - a.count);
+
+    const byWaiter = Array.from(byWaiterMap.values())
+      .map((x) => ({
+        name: x.name,
+        count: x.count,
+        totalCents: x.totalCents,
+        tablesCount: x.tables.size
+      }))
+      .sort((a, b) => b.totalCents - a.totalCents || b.count - a.count);
+
+    const byGroup = Array.from(byGroupMap.values()).sort((a, b) => b.totalCents - a.totalCents);
+
     return {
       metricKey,
       cancelledCount: Number(metrics.cancelledCount || detailed.length || 0),
-      cancelledCents: Number(metrics.cancelledCents || 0),
-      items: Array.isArray(metrics.cancelledItems) ? metrics.cancelledItems : [],
+      cancelledCents,
+      impactPctOfSales,
+      byReason,
+      byWaiter,
+      byGroup,
+      items: fallbackItems,
       detailedItems: detailed
     };
   }
 
   if (metricKey === 'discounts') {
+    const discountDetails = Array.isArray(audit.discountDetails) ? audit.discountDetails : [];
+    const discountsCents = Number(metrics.discountsCents || 0);
+    const internalConsumptionCents = Number(metrics.internalConsumptionCents || 0);
+    const internalConsumptionCostCents = Number(audit.internalConsumptionCostCents || 0);
+    const systemTotalCents = Number(result.systemTotalCents || 0);
+
+    const byEmployeeMap = new Map();
+    const byReasonMap = new Map();
+    for (const d of discountDetails) {
+      const emp = String(d.employee || 'Não identificado').trim() || 'Não identificado';
+      const eCur = byEmployeeMap.get(emp.toUpperCase()) || { employee: emp, count: 0, totalCents: 0 };
+      eCur.count += 1;
+      eCur.totalCents += Number(d.amountCents || 0);
+      byEmployeeMap.set(emp.toUpperCase(), eCur);
+
+      const rsn = String(d.reason || d.source || 'Desconto').trim() || 'Desconto';
+      const rCur = byReasonMap.get(rsn.toUpperCase()) || { reason: rsn, count: 0, totalCents: 0 };
+      rCur.count += 1;
+      rCur.totalCents += Number(d.amountCents || 0);
+      byReasonMap.set(rsn.toUpperCase(), rCur);
+    }
+
+    const internalConsumptionItems = systemItems
+      .filter(
+        (s) =>
+          s &&
+          (s.subCategory === 'consumo_interno' ||
+            /consumo\s*interno/i.test(`${s.metadata?.formaPagto || ''} ${s.description || ''}`))
+      )
+      .map((s) => ({
+        id: s.id,
+        orderNumber: s.referenceCode || s.metadata?.orderDetail?.orderNumber || '',
+        description: s.description || 'Consumo Interno',
+        timeStr: s.timeStr || '',
+        operatorName: s.operatorName || '',
+        terminalName: s.terminalName || '',
+        amountCents: Number(s.amountCents || 0),
+        items: Array.isArray(s.metadata?.orderDetail?.items) ? s.metadata.orderDetail.items : []
+      }))
+      .sort((a, b) => b.amountCents - a.amountCents);
+
+    const totalBenefitCents = discountsCents + internalConsumptionCents;
+    const impactPctOfSales = systemTotalCents > 0 ? Number(((totalBenefitCents / systemTotalCents) * 100).toFixed(2)) : 0;
+
     return {
       metricKey,
-      discountsCents: Number(metrics.discountsCents || 0),
-      internalConsumptionCents: Number(metrics.internalConsumptionCents || 0),
-      internalConsumptionCostCents: Number(audit.internalConsumptionCostCents || 0),
-      systemTotalCents: Number(result.systemTotalCents || 0),
-      discountDetails: Array.isArray(audit.discountDetails) ? audit.discountDetails : []
+      discountsCents,
+      internalConsumptionCents,
+      internalConsumptionCostCents,
+      systemTotalCents,
+      totalBenefitCents,
+      impactPctOfSales,
+      byEmployee: Array.from(byEmployeeMap.values()).sort((a, b) => b.totalCents - a.totalCents),
+      byReason: Array.from(byReasonMap.values()).sort((a, b) => b.totalCents - a.totalCents),
+      internalConsumptionItems,
+      discountDetails
     };
   }
 
   if (metricKey === 'delivery_house_fees') {
     const deliveryFeeCents = Number(metrics.deliveryFeeCents || 0);
     const serviceFeeCents = Number(metrics.serviceFeeCents || 0);
+    const feeRemovals = Array.isArray(audit.feeRemovals) ? audit.feeRemovals : [];
+
+    // Extrai pedidos Delivery do PDV para detalhar taxa de entrega média e volume de entregas
+    const seenDeliveryKeys = new Set();
+    const deliveryOrders = [];
+    const seenServiceKeys = new Set();
+    const serviceFeeOrders = [];
+
+    for (const s of systemItems) {
+      if (!s) continue;
+      const modRaw = `${s.metadata?.orderDetail?.module || ''} ${s.metadata?.modulo || ''} ${s.description || ''}`.toUpperCase();
+      const orderNum = String(s.referenceCode || s.metadata?.orderDetail?.orderNumber || s.id).trim();
+      const scopeKey = s.metadata?.orderDetail?.scopeKey || `${modRaw}_${orderNum}_${s.timeStr || ''}`;
+
+      if (modRaw.includes('DELIVERY') || modRaw.includes('IFOOD') || modRaw.includes('ENTREGA')) {
+        if (!seenDeliveryKeys.has(scopeKey)) {
+          seenDeliveryKeys.add(scopeKey);
+          const od = s.metadata?.orderDetail;
+          const totalOrder = Number(od?.totalPaidCents ?? s.amountCents ?? 0);
+          const itemsSub = Number(od?.itemsSubtotalCents || 0);
+          const inferredFee = itemsSub > 0 && totalOrder > itemsSub ? totalOrder - itemsSub : 0;
+          deliveryOrders.push({
+            id: s.id,
+            orderNumber: orderNum,
+            description: s.description || '',
+            timeStr: s.timeStr || '',
+            operatorName: s.operatorName || '',
+            amountCents: totalOrder,
+            itemsSubtotalCents: itemsSub,
+            inferredFeeCents: inferredFee,
+            itemsCount: Array.isArray(od?.items) ? od.items.length : 0
+          });
+        }
+      }
+
+      const odSvcFee = Number(s.metadata?.orderDetail?.serviceFeeCents || 0);
+      if (odSvcFee > 0 && !seenServiceKeys.has(scopeKey)) {
+        seenServiceKeys.add(scopeKey);
+        serviceFeeOrders.push({
+          id: s.id,
+          orderNumber: orderNum,
+          module: s.metadata?.orderDetail?.module || s.metadata?.modulo || 'MESA',
+          timeStr: s.timeStr || '',
+          waiters: Array.isArray(s.metadata?.orderDetail?.waiters) ? s.metadata.orderDetail.waiters : [],
+          itemsSubtotalCents: Number(s.metadata?.orderDetail?.itemsSubtotalCents || 0),
+          serviceFeeCents: odSvcFee,
+          totalPaidCents: Number(s.metadata?.orderDetail?.totalPaidCents || s.amountCents || 0)
+        });
+      }
+    }
+
+    deliveryOrders.sort((a, b) => (b.timeStr || '').localeCompare(a.timeStr || ''));
+    serviceFeeOrders.sort((a, b) => b.serviceFeeCents - a.serviceFeeCents);
+
+    const deliveryGrossCents = deliveryOrders.reduce((s, d) => s + d.amountCents, 0);
+    const avgDeliveryFeeCents =
+      deliveryOrders.length > 0 && deliveryFeeCents > 0 ? Math.round(deliveryFeeCents / deliveryOrders.length) : 0;
+
+    let estimatedLostServiceFeeCents = 0;
+    const removalWaiterMap = new Map();
+    for (const fr of feeRemovals) {
+      const lost = Math.round(Number(fr.totalCents || 0) * 0.1);
+      estimatedLostServiceFeeCents += lost;
+      const wName = String(fr.waiter || fr.operator || 'Não informado').trim() || 'Não informado';
+      const cur = removalWaiterMap.get(wName.toUpperCase()) || { name: wName, count: 0, baseTotalCents: 0, estimatedLostCents: 0 };
+      cur.count += 1;
+      cur.baseTotalCents += Number(fr.totalCents || 0);
+      cur.estimatedLostCents += lost;
+      removalWaiterMap.set(wName.toUpperCase(), cur);
+    }
+
     return {
       metricKey,
       deliveryFeeCents,
       serviceFeeCents,
       totalCents: deliveryFeeCents + serviceFeeCents,
-      feeRemovals: Array.isArray(audit.feeRemovals) ? audit.feeRemovals : []
+      deliveryOrdersCount: deliveryOrders.length,
+      deliveryGrossCents,
+      avgDeliveryFeeCents,
+      deliveryOrders,
+      serviceFeeOrders,
+      estimatedLostServiceFeeCents,
+      feeRemovalsByWaiter: Array.from(removalWaiterMap.values()).sort((a, b) => b.estimatedLostCents - a.estimatedLostCents),
+      feeRemovals
     };
   }
 
@@ -1176,4 +1738,247 @@ export function shouldPreferLocalDraftOverSession(localDraft, cloudSession) {
   const localTs = Date.parse(localDraft.updatedAt || '');
   const cloudTs = Date.parse(cloudSession.updated_at || cloudSession.created_at || '');
   return Number.isFinite(localTs) && (!Number.isFinite(cloudTs) || localTs > cloudTs);
+}
+
+/**
+ * Aplica preenchimentos padrão no espelho aberto (Só Sangria R$ 0,00 na gaveta e Pendentes REAL = SISTEMA),
+ * preservando edições manuais do usuário, rascunhos legados com override próprio e sessões já fechadas.
+ */
+export function buildDefaultManualInputsPatch(
+  manualInputs = {},
+  reconciliationResult = null,
+  { isClosedSession = false } = {}
+) {
+  if (isClosedSession || !reconciliationResult) return null;
+
+  const current = manualInputs && typeof manualInputs === 'object' ? manualInputs : {};
+  const patch = {};
+  let changed = false;
+
+  const hasCashCounted =
+    current.cashCountedCents !== undefined && current.cashCountedCents !== null;
+  if (!hasCashCounted && current.cashDrawerZeroConfirmed === undefined) {
+    patch.cashCountedCents = 0;
+    patch.cashDrawerZeroConfirmed = true;
+    changed = true;
+  }
+
+  const pendentesRow = Array.isArray(reconciliationResult.mirrorRows)
+    ? reconciliationResult.mirrorRows.find((r) => r && r.key === 'pendentes')
+    : null;
+  const sysPendentesCents = Number(pendentesRow?.systemCents || 0);
+  const currentOverrides =
+    current.categoryRealOverrides && typeof current.categoryRealOverrides === 'object'
+      ? current.categoryRealOverrides
+      : {};
+  const hasExplicitPendentes = currentOverrides.pendentes !== undefined;
+  const userTouchedPendentes = Boolean(current.pendentesTouched);
+  const canAutoFillPendentes =
+    !userTouchedPendentes && (!hasExplicitPendentes || Boolean(current.pendentesAutoSynced));
+
+  if (
+    sysPendentesCents > 0 &&
+    canAutoFillPendentes &&
+    (!hasExplicitPendentes || Number(currentOverrides.pendentes) !== sysPendentesCents || current.pendentesAutoSynced !== true)
+  ) {
+    patch.categoryRealOverrides = {
+      ...currentOverrides,
+      pendentes: sysPendentesCents
+    };
+    patch.pendentesAutoSynced = true;
+    changed = true;
+  }
+
+  return changed ? patch : null;
+}
+
+/**
+ * Indexa itens de sistema ↔ recebimentos bancários vinculados para consulta bidirecional nos detalhes.
+ */
+export function buildPairedItemsByIdMap(matchedPairs = []) {
+  const map = new Map();
+  for (const pair of matchedPairs || []) {
+    const sysItems = Array.isArray(pair?.systemItems) ? pair.systemItems : [];
+    const realItems = Array.isArray(pair?.realItems) ? pair.realItems : [];
+    for (const s of sysItems) {
+      if (!s?.id) continue;
+      const existing = map.get(s.id) || [];
+      map.set(s.id, existing.length > 0 ? [...existing, ...realItems] : [...realItems]);
+    }
+    for (const r of realItems) {
+      if (!r?.id) continue;
+      const existing = map.get(r.id) || [];
+      map.set(r.id, existing.length > 0 ? [...existing, ...sysItems] : [...sysItems]);
+    }
+  }
+  return map;
+}
+
+/**
+ * Monta o plano estruturado de ação para levar o caixa da Saúde atual até 100%,
+ * gerando pares rápidos de batimento e dicas focadas na diferença real (sobra/falta).
+ */
+export function buildCashHealthActionPlan(result = {}) {
+  const breakdown = result?.healthBreakdown || {};
+  const rawHealthScore = Math.max(
+    0,
+    Math.min(100, Math.round(Number(breakdown.rawHealthScore ?? result?.rawHealthScore ?? result?.healthScore ?? 0)))
+  );
+  const effectiveHealthScore = Math.max(0, Math.min(100, Math.round(Number(result?.healthScore ?? rawHealthScore))));
+  const isForcedBalanced = Boolean(result?.isForcedBalanced);
+  const diffTotalCents = Math.round(Number(result?.diffTotalCents || 0));
+
+  const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
+  const missingInBank = Array.isArray(result?.missingInBank) ? result.missingInBank : [];
+  const extraInBank = Array.isArray(result?.extraInBank) ? result.extraInBank : [];
+  const drawer = result?.cashDrawerSummary || {};
+  const warnings = Array.isArray(result?.periodDiagnostics?.validationWarnings)
+    ? result.periodDiagnostics.validationWarnings
+    : [];
+  const criticalWarnings = warnings.filter((w) => w && (w.severity === 'error' || w.severity === 'warning'));
+
+  const smallDiffCount = suggestions.filter(
+    (s) => s.reasonType === 'small_diff' || s.reasonType === 'high_similarity'
+  ).length;
+  const nonDrawerSugCount = suggestions.filter(
+    (s) => s.reasonType !== 'cash_to_pending' && s.reasonType !== 'surplus_to_cash'
+  ).length;
+  const structuralSugCount = Math.max(0, nonDrawerSugCount - smallDiffCount);
+
+  const sugRecoverablePts = Math.round((structuralSugCount * 2.5 + smallDiffCount * 1.5) * 10) / 10;
+  const missingRecoverablePts = missingInBank.length * 3;
+  const extraRecoverablePts = extraInBank.length * 2;
+  const unmatchedRecoverablePts = missingRecoverablePts + extraRecoverablePts;
+  const diffPenaltyPts = Number(breakdown.diffPenaltyPts || 0);
+
+  const mirrorRows = Array.isArray(result?.mirrorRows) ? result.mirrorRows : [];
+  const cashRow = mirrorRows.find((r) => r && r.key === 'saldo_dinheiro') || null;
+  const cashDiffCents = Number(cashRow?.diffCents || 0);
+  const drawerUninformed = drawer.countedCents === null && !cashRow?.hasRealInput;
+
+  const steps = [];
+
+  if (suggestions.length > 0) {
+    steps.push({
+      key: 'suggestions',
+      priority: 1,
+      title: `Revisar ${suggestions.length} sugestão(ões) pronta(s) do auditor`,
+      description: 'Confirmar ou rejeitar as sugestões já calculadas pelo sistema reduz faltas e sobras em 1 clique.',
+      pendingCount: suggestions.length,
+      recoverablePoints: Math.max(1, sugRecoverablePts),
+      actionLabel: 'Abrir Sugestões',
+      targetMode: 'sugestoes'
+    });
+  }
+
+  if (missingInBank.length > 0 || extraInBank.length > 0) {
+    steps.push({
+      key: 'unmatched',
+      priority: 2,
+      title: `Bater ${missingInBank.length} venda(s) PDV × ${extraInBank.length} entrada(s) do Banco`,
+      description:
+        diffTotalCents !== 0
+          ? `Use os pares rápidos abaixo para explicar ${diffTotalCents > 0 ? 'a sobra de +' : 'a falta de -'}R$ ${(Math.abs(diffTotalCents) / 100).toFixed(2).replace('.', ',')} e zerar pendências.`
+          : 'Vincule os recebimentos restantes lado a lado, troque a forma de pagamento ou justifique exceções.',
+      pendingCount: missingInBank.length + extraInBank.length,
+      recoverablePoints: unmatchedRecoverablePts,
+      actionLabel: 'Ir p/ Batimento Rápido',
+      targetMode: 'batimento'
+    });
+  }
+
+  if (drawerUninformed || Math.abs(cashDiffCents) > 100) {
+    steps.push({
+      key: 'drawer',
+      priority: 3,
+      title: drawerUninformed
+        ? 'Confirmar Dinheiro Contado na gaveta'
+        : `Verificar diferença física de ${cashDiffCents > 0 ? '+' : '-'}R$ ${(Math.abs(cashDiffCents) / 100).toFixed(2).replace('.', ',')} na gaveta`,
+      description: drawerUninformed
+        ? 'Confirme Só Sangria (R$ 0,00) ou digite o valor físico contado na aba Espelho.'
+        : 'Confira se algum pedido Delivery em Dinheiro foi Nota Pendente ou lance uma justificativa de gaveta.',
+      pendingCount: 1,
+      recoverablePoints: 0,
+      actionLabel: 'Abrir Saldo em Dinheiro',
+      targetMode: 'mirror_dinheiro'
+    });
+  }
+
+  if (criticalWarnings.length > 0) {
+    steps.push({
+      key: 'warnings',
+      priority: 4,
+      title: `Checar ${criticalWarnings.length} alerta(s) de auditoria/arquivos`,
+      description: criticalWarnings.map((w) => w.title).slice(0, 2).join(' • '),
+      pendingCount: criticalWarnings.length,
+      recoverablePoints: 0,
+      actionLabel: 'Ver Alertas & Checklist',
+      targetMode: 'checklist'
+    });
+  }
+
+  // Pares rápidos recomendados entre Faltam (PDV) e Sobram (Banco) que ainda não foram fechados
+  const quickPairs = [];
+  for (const sys of missingInBank) {
+    let bestReal = null;
+    let bestScore = Infinity;
+    for (const real of extraInBank) {
+      const sAmt = Number(sys.amountCents || 0);
+      const rAmt = Number(real.amountCents || 0);
+      const maxAmt = Math.max(sAmt, rAmt, 1);
+      const simPct = Math.round((1 - Math.abs(sAmt - rAmt) / maxAmt) * 100);
+      if (simPct < 65 && Math.abs(sAmt - rAmt) > 1500) continue;
+
+      let dt = Number.isFinite(sys.secondsOfDay) && Number.isFinite(real.secondsOfDay)
+        ? Math.abs(sys.secondsOfDay - real.secondsOfDay)
+        : 3600;
+      if (real.source === 'rede' && real.secondsOfDay < 12 * 3600 && sys.secondsOfDay >= 12 * 3600) {
+        dt = Math.min(dt, Math.abs(sys.secondsOfDay - (real.secondsOfDay + 12 * 3600)));
+      }
+      const sameCatPenalty = sys.category === real.category ? 0 : 120000;
+      const score = (100 - simPct) * 100000 + sameCatPenalty + dt;
+      if (score < bestScore) {
+        bestScore = score;
+        bestReal = { real, simPct, diffCents: rAmt - sAmt, dt };
+      }
+    }
+    if (bestReal) {
+      quickPairs.push({
+        id: `qpair_${sys.id}_${bestReal.real.id}`,
+        sysItems: [sys],
+        realItems: [bestReal.real],
+        similarityPct: bestReal.simPct,
+        diffCents: bestReal.diffCents,
+        sameCategory: sys.category === bestReal.real.category,
+        timeDiffMin: Math.max(1, Math.round(bestReal.dt / 60)),
+        explainsGlobalDiff:
+          diffTotalCents !== 0 &&
+          Math.abs(bestReal.diffCents - diffTotalCents) <= Math.max(300, Math.round(Math.abs(diffTotalCents) * 0.35))
+      });
+    }
+  }
+  quickPairs.sort((a, b) => b.similarityPct - a.similarityPct || a.timeDiffMin - b.timeDiffMin);
+
+  const missingTotalCents = missingInBank.reduce((s, i) => s + Number(i.amountCents || 0), 0);
+  const extraTotalCents = extraInBank.reduce((s, i) => s + Number(i.amountCents || 0), 0);
+
+  return {
+    rawHealthScore,
+    effectiveHealthScore,
+    isForcedBalanced,
+    forcedReason: result?.forcedBalanced?.reason || '',
+    pointsMissing: Math.max(0, 100 - rawHealthScore),
+    diffTotalCents,
+    cashDiffCents,
+    missingTotalCents,
+    extraTotalCents,
+    tableNetDiffCents: extraTotalCents - missingTotalCents,
+    diffPenaltyPts,
+    sugRecoverablePts,
+    missingRecoverablePts,
+    extraRecoverablePts,
+    unmatchedRecoverablePts,
+    steps,
+    quickPairs: quickPairs.slice(0, 8)
+  };
 }

@@ -5,6 +5,7 @@ import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
 import { supabase, masterSupabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
+import { BrlCurrencyInput } from '../components/ui/BrlCurrencyInput';
 import {
   isRemoteAccessEnabledForCompany,
   parseAllowedEmailsInput,
@@ -1014,7 +1015,7 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                      <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Mensalidade (R$)</label>
-                     <input type="number" step="0.01" required value={newPlan.price} onChange={e => setNewPlan({...newPlan, price: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
+                     <BrlCurrencyInput required valueReais={newPlan.price} onChangeReais={val => setNewPlan({...newPlan, price: val})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>

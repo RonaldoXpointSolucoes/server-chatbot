@@ -18,7 +18,8 @@ import {
   AlertTriangle,
   Calendar,
   Table2,
-  RotateCcw
+  RotateCcw,
+  ShoppingBag
 } from 'lucide-react';
 import {
   CashAiAnalysis,
@@ -37,19 +38,29 @@ import { formatReopenedTableAudit } from '../../utils/cashOperationItemsHelper.m
 import {
   RECONCILIATION_GLOSSARY,
   buildLinkableSystemPool,
+  buildPairedItemsByIdMap,
   filterVisibleMirrorRows,
   formatDateBr,
   formatDateHeaderBadge,
   parseUiMoneyInputToCents
 } from '../../utils/cashReconciliationServiceHelper.mjs';
-import { CashDrawerOutflowsModal, DrawerOutflowModalTab } from './CashDrawerOutflowsModal';
+import { buildPdvOrdersCatalog } from '../../utils/cashOperationItemsHelper.mjs';
+import {
+  CashDrawerOutflowsModal,
+  DrawerOutflowModalTab
+} from './CashDrawerOutflowsModal';
 import { CashManualReconciliationTable } from './CashManualReconciliationTable';
+import { CashOperationDetailModal } from './CashOperationDetailModal';
+import { CashPdvOrdersPanel } from './CashPdvOrdersPanel';
+import { CashSuggestionCard } from './CashSuggestionCard';
+import { BrlCurrencyInput } from '../ui/BrlCurrencyInput';
+import { formatCentsAsBrlInput } from '../../utils/currencyInputMask.mjs';
 import {
   CashMirrorRowDetailPanel,
   CashSystemCategoryTarget
 } from './CashMirrorRowDetailPanel';
 
-type TabKey = 'espelho' | 'tabela' | 'sugestoes' | 'faltam' | 'sobram' | 'auditoria' | 'ia';
+type TabKey = 'espelho' | 'pedidos' | 'tabela' | 'sugestoes' | 'faltam' | 'sobram' | 'auditoria' | 'ia';
 
 interface CashReconciliationWorkbenchProps {
   result: CashReconciliationResult;
@@ -62,6 +73,7 @@ interface CashReconciliationWorkbenchProps {
   onManualLink: (systemIds: string[], realIds: string[], note?: string) => void;
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onReclassifySystemItem: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
+  onReclassifySystemItems?: (systemIds: string[], targetCategory: CashSystemCategoryTarget) => void;
   manualResolutionsCount?: number;
   onUndoLastResolution?: () => void;
   rules: CashRuleRow[];
@@ -84,8 +96,7 @@ interface CashReconciliationWorkbenchProps {
 const parseInputToCents = parseUiMoneyInputToCents;
 
 function centsToInputStr(cents: number | null | undefined): string {
-  if (cents === null || cents === undefined) return '';
-  return (cents / 100).toFixed(2).replace('.', ',');
+  return formatCentsAsBrlInput(cents);
 }
 
 export function CashReconciliationWorkbench({
@@ -99,6 +110,7 @@ export function CashReconciliationWorkbench({
   onManualLink,
   onIgnoreItem,
   onReclassifySystemItem,
+  onReclassifySystemItems,
   manualResolutionsCount = 0,
   onUndoLastResolution,
   rules,
@@ -120,8 +132,11 @@ export function CashReconciliationWorkbench({
   };
   const [showZeroMirrorRows, setShowZeroMirrorRows] = useState(false);
   const [drawerDetailTab, setDrawerDetailTab] = useState<DrawerOutflowModalTab | null>(null);
+  const [inspectedOp, setInspectedOp] = useState<{
+    item: CashReconciliationItem;
+    paired: CashReconciliationItem[];
+  } | null>(null);
   const [editingMirrorKey, setEditingMirrorKey] = useState<string | null>(null);
-  const [draftMirrorTexts, setDraftMirrorTexts] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMissingId, setSelectedMissingId] = useState<string | null>(null);
   const [selectedExtraId, setSelectedExtraId] = useState<string | null>(null);
@@ -143,9 +158,6 @@ export function CashReconciliationWorkbench({
   const [adjOperator, setAdjOperator] = useState('');
   const [adjFormError, setAdjFormError] = useState('');
 
-  // Estado local dos inputs monetários da aba Espelho (sincroniza ao trocar ou resetar sessão)
-  const [cashText, setCashText] = useState<string>(() => centsToInputStr(manualInputs.cashCountedCents));
-  const [sangriaText, setSangriaText] = useState<string>(() => centsToInputStr(manualInputs.sangriaOverrideCents));
   const [showDrawerAdjustments, setShowDrawerAdjustments] = useState<boolean>(() =>
     Boolean(
       (manualInputs.outrasSaidasOverrideCents ?? 0) > 0 ||
@@ -154,21 +166,9 @@ export function CashReconciliationWorkbench({
         (manualInputs.fundoNoiteOverrideCents ?? 0) > 0
     )
   );
-  const [drawerOverrideTexts, setDrawerOverrideTexts] = useState<Record<string, string>>(() => ({
-    outrasSaidasOverrideCents: centsToInputStr(manualInputs.outrasSaidasOverrideCents),
-    outrasEntradasOverrideCents: centsToInputStr(manualInputs.outrasEntradasOverrideCents),
-    saidasPagamentosOverrideCents: centsToInputStr(manualInputs.saidasPagamentosOverrideCents),
-    fundoNoiteOverrideCents: centsToInputStr(manualInputs.fundoNoiteOverrideCents)
-  }));
-  const cashTextRef = useRef(cashText);
-  const sangriaTextRef = useRef(sangriaText);
-  const drawerOverrideTextsRef = useRef(drawerOverrideTexts);
   const [notesText, setNotesText] = useState<string>(() => manualInputs.notes || '');
   const notesTextRef = useRef(notesText);
   const notesDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  cashTextRef.current = cashText;
-  sangriaTextRef.current = sangriaText;
-  drawerOverrideTextsRef.current = drawerOverrideTexts;
   notesTextRef.current = notesText;
 
   useEffect(() => {
@@ -185,46 +185,6 @@ export function CashReconciliationWorkbench({
       }
     };
   }, []);
-
-  useEffect(() => {
-    const incomingCash = manualInputs.cashCountedCents ?? null;
-    if (parseInputToCents(cashTextRef.current) !== incomingCash) {
-      setCashText(centsToInputStr(incomingCash));
-    }
-  }, [manualInputs.cashCountedCents]);
-
-  useEffect(() => {
-    const incomingSangria = manualInputs.sangriaOverrideCents ?? null;
-    if (parseInputToCents(sangriaTextRef.current) !== incomingSangria) {
-      setSangriaText(centsToInputStr(incomingSangria));
-    }
-  }, [manualInputs.sangriaOverrideCents]);
-
-  useEffect(() => {
-    const fields = [
-      'outrasSaidasOverrideCents',
-      'outrasEntradasOverrideCents',
-      'saidasPagamentosOverrideCents',
-      'fundoNoiteOverrideCents'
-    ] as const;
-    setDrawerOverrideTexts((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const field of fields) {
-        const incoming = manualInputs[field] ?? null;
-        if (parseInputToCents(drawerOverrideTextsRef.current[field]) !== incoming) {
-          next[field] = centsToInputStr(incoming);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [
-    manualInputs.outrasSaidasOverrideCents,
-    manualInputs.outrasEntradasOverrideCents,
-    manualInputs.saidasPagamentosOverrideCents,
-    manualInputs.fundoNoiteOverrideCents
-  ]);
 
   const queryLower = searchTerm.trim().toLowerCase();
 
@@ -248,8 +208,23 @@ export function CashReconciliationWorkbench({
     );
   }, [result.extraInBank, queryLower]);
 
+  const pairedByItemId = useMemo(
+    () => buildPairedItemsByIdMap(result.matchedPairs || []) as Map<string, CashReconciliationItem[]>,
+    [result.matchedPairs]
+  );
+
+  const pdvOrdersCount = useMemo(
+    () => (buildPdvOrdersCatalog(result) as { orders: unknown[] }).orders.length,
+    [result]
+  );
+
   const tabs: Array<{ key: TabKey; label: string; count?: number; highlight?: string }> = [
     { key: 'espelho', label: 'Espelho RelConferencia' },
+    {
+      key: 'pedidos',
+      label: 'Pedidos PDV',
+      count: pdvOrdersCount
+    },
     {
       key: 'tabela',
       label: 'Tabela Conciliação',
@@ -487,7 +462,6 @@ export function CashReconciliationWorkbench({
                     <button
                       type="button"
                       onClick={() => {
-                        setCashText('0,00');
                         const nextOverrides = { ...(manualInputs.categoryRealOverrides || {}) };
                         if (nextOverrides.saldo_dinheiro !== undefined) delete nextOverrides.saldo_dinheiro;
                         onUpdateManualInputs({
@@ -506,13 +480,9 @@ export function CashReconciliationWorkbench({
                       Só Sangria (R$ 0,00)
                     </button>
                   </div>
-                  <input
-                    type="text"
-                    value={cashText}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCashText(val);
-                      const parsed = parseInputToCents(val);
+                  <BrlCurrencyInput
+                    valueCents={manualInputs.cashDrawerZeroConfirmed ? 0 : (manualInputs.cashCountedCents ?? null)}
+                    onChangeCents={(parsed) => {
                       const nextOverrides = { ...(manualInputs.categoryRealOverrides || {}) };
                       if (nextOverrides.saldo_dinheiro !== undefined) {
                         delete nextOverrides.saldo_dinheiro;
@@ -528,7 +498,7 @@ export function CashReconciliationWorkbench({
                         });
                       }
                     }}
-                    placeholder="Ex: 257,27"
+                    placeholder="0,00"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
                   />
                 </div>
@@ -537,14 +507,10 @@ export function CashReconciliationWorkbench({
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-[#d1d7db] mb-1">
                     Ajuste de Sangria (R$, opcional)
                   </label>
-                  <input
-                    type="text"
-                    value={sangriaText}
-                    onChange={(e) => {
-                      setSangriaText(e.target.value);
-                      onUpdateManualInputs({ sangriaOverrideCents: parseInputToCents(e.target.value) });
-                    }}
-                    placeholder={`Padrão do TXT: ${centsToInputStr(drawer.sangriaCents)}`}
+                  <BrlCurrencyInput
+                    valueCents={manualInputs.sangriaOverrideCents ?? null}
+                    onChangeCents={(parsed) => onUpdateManualInputs({ sangriaOverrideCents: parsed })}
+                    placeholder={`Padrão do TXT: ${centsToInputStr(drawer.sangriaCents) || '0,00'}`}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
                   />
                   {(drawer.sangriaIntermediariaCents || 0) > 0 && (
@@ -684,11 +650,10 @@ export function CashReconciliationWorkbench({
                           <label className="block text-[10px] font-bold text-slate-600 dark:text-[#aebac1] mb-0.5">
                             Valor (R$) *
                           </label>
-                          <input
-                            type="text"
-                            value={adjAmountText}
-                            onChange={(e) => {
-                              setAdjAmountText(e.target.value);
+                          <BrlCurrencyInput
+                            valueText={adjAmountText}
+                            onChangeText={(val) => {
+                              setAdjAmountText(val);
                               if (adjFormError) setAdjFormError('');
                             }}
                             onKeyDown={(e) => {
@@ -697,7 +662,7 @@ export function CashReconciliationWorkbench({
                                 handleAddCashAdjustment();
                               }
                             }}
-                            placeholder="Ex.: 55,00"
+                            placeholder="0,00"
                             className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-[#2a3942] bg-slate-50 dark:bg-[#202c33] text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
                           />
                         </div>
@@ -771,13 +736,10 @@ export function CashReconciliationWorkbench({
                           <label className="block text-[10px] font-bold text-slate-600 dark:text-[#aebac1] mb-0.5 truncate">
                             {field.label}
                           </label>
-                          <input
-                            type="text"
-                            value={drawerOverrideTexts[field.key] ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setDrawerOverrideTexts((prev) => ({ ...prev, [field.key]: val }));
-                              onUpdateManualInputs({ [field.key]: parseInputToCents(val) });
+                          <BrlCurrencyInput
+                            valueCents={manualInputs[field.key] ?? null}
+                            onChangeCents={(parsed) => {
+                              onUpdateManualInputs({ [field.key]: parsed });
                             }}
                             placeholder={field.placeholder}
                             className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
@@ -854,10 +816,13 @@ export function CashReconciliationWorkbench({
                       const diff = Number(row.diffCents || 0);
                       const isEditable = !row.isAuto;
                       const isSelected = expandedMirrorKey === row.key;
-                      const inputValue =
+                      const overrideVal = manualInputs.categoryRealOverrides?.[row.key];
+                      const effectiveCents =
                         editingMirrorKey === row.key
-                          ? (draftMirrorTexts[row.key] ?? '')
-                          : (row.hasRealInput ? centsToInputStr(row.realCents) : '');
+                          ? overrideVal !== undefined
+                            ? overrideVal
+                            : (row.hasRealInput ? row.realCents : null)
+                          : (row.hasRealInput ? row.realCents : null);
 
                       return (
                         <tr
@@ -905,26 +870,21 @@ export function CashReconciliationWorkbench({
                           </td>
                           <td className="py-2.5 px-3 text-right font-bold text-slate-900 dark:text-white tabular-nums">
                             {isEditable ? (
-                              <input
-                                type="text"
-                                value={inputValue}
+                              <BrlCurrencyInput
+                                valueCents={effectiveCents}
                                 onClick={(e) => e.stopPropagation()}
                                 onFocus={(e) => {
                                   setEditingMirrorKey(row.key);
-                                  setDraftMirrorTexts((prev) => ({
-                                    ...prev,
-                                    [row.key]: row.hasRealInput ? centsToInputStr(row.realCents) : ''
-                                  }));
                                   e.target.select();
                                 }}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setDraftMirrorTexts((prev) => ({ ...prev, [row.key]: val }));
-                                  const parsed = parseInputToCents(val);
+                                onChangeCents={(parsed) => {
                                   const nextOverrides = { ...(manualInputs.categoryRealOverrides || {}) };
                                   if (parsed === null) delete nextOverrides[row.key];
                                   else nextOverrides[row.key] = parsed;
-                                  onUpdateManualInputs({ categoryRealOverrides: nextOverrides });
+                                  onUpdateManualInputs({
+                                    categoryRealOverrides: nextOverrides,
+                                    ...(row.key === 'pendentes' ? { pendentesTouched: true, pendentesAutoSynced: false } : {})
+                                  });
                                 }}
                                 onBlur={() => {
                                   setEditingMirrorKey((curr) => (curr === row.key ? null : curr));
@@ -973,9 +933,76 @@ export function CashReconciliationWorkbench({
                     </tr>
                   </tbody>
                 </table>
+
+                {(() => {
+                  const cashAnomalies = (result.suggestions || []).filter(
+                    (s) =>
+                      s.reasonType === 'cash_to_pending' ||
+                      s.reasonType === 'surplus_to_cash' ||
+                      s.reasonType === 'cash_similarity'
+                  );
+                  if (cashAnomalies.length === 0) return null;
+                  const topSug = cashAnomalies[0];
+                  const topSysIds = (topSug.systemIds?.length ? topSug.systemIds : (topSug.systemItems || []).map((s) => s.id)).filter(Boolean);
+                  const canReclassifyTop = Boolean(topSysIds.length > 0 && topSug.suggestedTargetCategory);
+                  return (
+                    <div className="rounded-2xl border border-orange-500/35 bg-orange-500/10 p-3.5 space-y-2 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-800 dark:text-orange-200 text-[10px] font-black uppercase">
+                            Suspeita de Dinheiro / Pendente ({cashAnomalies.length})
+                          </span>
+                          {typeof topSug.similarityPct === 'number' && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[10px] font-black">
+                              {topSug.similarityPct}% semelhante
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {canReclassifyTop && topSug.suggestedTargetCategory && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onReclassifySystemItems) {
+                                  onReclassifySystemItems(topSysIds, topSug.suggestedTargetCategory!);
+                                } else {
+                                  topSysIds.forEach((id) => onReclassifySystemItem(id, topSug.suggestedTargetCategory!));
+                                }
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-black active:scale-95 transition-all"
+                            >
+                              {topSug.suggestedTargetCategory === 'pendente'
+                                ? 'Mudar p/ Pendente (1 Clique)'
+                                : `Mudar p/ ${topSug.suggestedTargetCategory.toUpperCase()}`}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('sugestoes')}
+                            className="px-2.5 py-1.5 rounded-lg border border-orange-500/35 bg-white/80 dark:bg-[#111b21] text-orange-700 dark:text-orange-300 text-[11px] font-bold"
+                          >
+                            Ver Sugestões
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[11.5px] font-semibold text-slate-800 dark:text-[#e9edef] leading-relaxed">
+                        {topSug.reasonText}
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
+        )}
+
+        {/* ABA: PEDIDOS DO PDV POR CANAL (DELIVERY, MESA, BALCAO, TOTEM, PENDENTE) */}
+        {activeTab === 'pedidos' && (
+          <CashPdvOrdersPanel
+            result={result}
+            onInspectOrder={(item, paired) => setInspectedOp({ item, paired })}
+            onReclassifySystemItem={onReclassifySystemItem}
+          />
         )}
 
         {/* ABA: TABELA MODERNA DE CONCILIAÇÃO MANUAL */}
@@ -986,6 +1013,7 @@ export function CashReconciliationWorkbench({
             extraSystemPoolItems={buildLinkableSystemPool(result) as CashReconciliationItem[]}
             onManualLink={onManualLink}
             onIgnoreItem={onIgnoreItem}
+            onInspectOperation={(it) => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
           />
         )}
 
@@ -1005,65 +1033,22 @@ export function CashReconciliationWorkbench({
             ) : (
               <div className="space-y-3">
                 {(result.suggestions || []).map((sug: CashSuggestion) => (
-                  <div
+                  <CashSuggestionCard
                     key={sug.id}
-                    className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1.5 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase">
-                          {sug.reasonType === 'swapped_method'
-                            ? 'Troca de Pagamento'
-                            : sug.reasonType === 'split_1_to_n'
-                              ? 'Pagamento Dividido (1:N)'
-                              : sug.reasonType === 'small_diff'
-                                ? 'Pequena Diferença (Troco / Taxa)'
-                                : 'Agrupado (N:1)'}
-                        </span>
-                        <span className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
-                          {formatCents(sug.amountCents)}
-                        </span>
-                      </div>
-                      <p className="text-xs font-semibold text-slate-700 dark:text-[#d1d7db]">
-                        {sug.reasonText}
-                      </p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 text-[11px]">
-                        <div className="rounded-xl bg-white/80 dark:bg-[#111b21]/80 px-3 py-2 border border-slate-200/70 dark:border-[#2a3942]">
-                          <p className="font-bold text-slate-400 uppercase text-[9.5px]">PDV (Sistema)</p>
-                          {(sug.systemItems || []).map((s: CashReconciliationItem) => (
-                            <p key={s.id} className="text-slate-700 dark:text-[#e9edef] font-medium">
-                              {s.timeStr} • {s.description} — <strong>{formatCents(s.amountCents)}</strong>
-                            </p>
-                          ))}
-                        </div>
-                        <div className="rounded-xl bg-white/80 dark:bg-[#111b21]/80 px-3 py-2 border border-slate-200/70 dark:border-[#2a3942]">
-                          <p className="font-bold text-slate-400 uppercase text-[9.5px]">Banco / Maquininha (Real)</p>
-                          {(sug.realItems || []).map((r: CashReconciliationItem) => (
-                            <p key={r.id} className="text-slate-700 dark:text-[#e9edef] font-medium">
-                              {r.timeStr} • {r.description} — <strong>{formatCents(r.amountCents)}</strong>
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => onConfirmSuggestion(sug.id)}
-                        className="px-3.5 py-2 min-h-[40px] rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
-                      >
-                        <CheckCircle2 size={14} /> Confirmar Vínculo
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onRejectSuggestion(sug.id)}
-                        className="px-3 py-2 min-h-[40px] rounded-xl border border-slate-300 dark:border-[#2a3942] hover:bg-rose-500/10 hover:text-rose-500 text-slate-600 dark:text-[#aebac1] text-xs font-bold flex items-center gap-1 active:scale-95 transition-all"
-                      >
-                        <XCircle size={14} /> Rejeitar
-                      </button>
-                    </div>
-                  </div>
+                    suggestion={sug}
+                    onConfirmSuggestion={onConfirmSuggestion}
+                    onRejectSuggestion={onRejectSuggestion}
+                    onReclassifySystemItems={(ids, cat) => {
+                      if (onReclassifySystemItems) {
+                        onReclassifySystemItems(ids, cat);
+                      } else {
+                        ids.forEach((id) => onReclassifySystemItem(id, cat));
+                      }
+                    }}
+                    onInspectOperation={(item) =>
+                      setInspectedOp({ item, paired: pairedByItemId.get(item.id) || [] })
+                    }
+                  />
                 ))}
               </div>
             )}
@@ -1185,9 +1170,15 @@ export function CashReconciliationWorkbench({
                   <div key={it.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-black text-rose-600 dark:text-rose-400 tabular-nums">
-                          {formatCents(it.amountCents)}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
+                          title="Clique no valor para ver quais itens compõem esta venda"
+                          className="inline-flex items-center gap-1 text-sm font-black text-rose-600 dark:text-rose-400 hover:text-[#00a884] dark:hover:text-[#00a884] tabular-nums underline decoration-rose-500/45 hover:decoration-[#00a884] decoration-dotted underline-offset-4 active:scale-95 transition-all"
+                        >
+                          <span>{formatCents(it.amountCents)}</span>
+                          <ShoppingBag size={12} className="opacity-75 shrink-0" />
+                        </button>
                         <span className="text-xs font-bold text-slate-800 dark:text-[#e9edef]">{it.description}</span>
                         {it.metadata?.recebidoEmBranco && (
                           <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
@@ -1195,6 +1186,12 @@ export function CashReconciliationWorkbench({
                           </span>
                         )}
                       </div>
+                      {it.metadata?.orderDetail?.items?.length ? (
+                        <p className="text-[11px] text-indigo-600 dark:text-indigo-300 font-medium mt-0.5 truncate">
+                          {it.metadata.orderDetail.items.length} item(ns):{' '}
+                          {it.metadata.orderDetail.items.slice(0, 2).map((x) => `${x.qty}x ${x.displayName}`).join(', ')}
+                        </p>
+                      ) : null}
                       <p className="text-[11px] text-slate-500 dark:text-[#8696a0]">
                         {formatDateBr(it.dateStr)} {it.timeStr} • Operador: {it.operatorName || 'Não informado'} • Terminal: {it.terminalName || '-'}
                       </p>
@@ -1688,6 +1685,14 @@ export function CashReconciliationWorkbench({
           drawer={drawer}
           cashRow={cashRow}
           dateBadge={dateBadge}
+          outflowNotesByKey={manualInputs.outflowNotesByKey || {}}
+          onSaveOutflowNote={(key, note) => {
+            const nextNotes = { ...(manualInputs.outflowNotesByKey || {}) };
+            if (note.trim()) nextNotes[key] = note.trim();
+            else delete nextNotes[key];
+            onUpdateManualInputs({ outflowNotesByKey: nextNotes });
+          }}
+          onOpenCashRowDetail={() => setExpandedMirrorKey('saldo_dinheiro')}
           onClose={() => setDrawerDetailTab(null)}
         />
       )}
@@ -1706,6 +1711,7 @@ export function CashReconciliationWorkbench({
             onManualLink={onManualLink}
             onIgnoreItem={onIgnoreItem}
             onReclassifySystemItem={onReclassifySystemItem}
+            onReclassifySystemItems={onReclassifySystemItems}
             onClose={() => setExpandedMirrorKey(null)}
           />
         );
@@ -1897,6 +1903,14 @@ function CashAuditInsightsSection({ insights }: { insights: CashAuditInsights })
           )}
         </div>
       )}
+
+      <CashOperationDetailModal
+        operationItem={inspectedOp?.item || null}
+        pairedItems={inspectedOp?.paired || []}
+        result={result}
+        onReclassifySystemItem={onReclassifySystemItem}
+        onClose={() => setInspectedOp(null)}
+      />
     </div>
   );
 }

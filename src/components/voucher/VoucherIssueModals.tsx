@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'react-qr-code';
+import { BrlCurrencyInput } from '../ui/BrlCurrencyInput';
+import { parseFormattedBrlToReais } from '../../utils/currencyInputMask.mjs';
 import {
   AlertCircle,
   AlertTriangle,
@@ -192,7 +194,7 @@ export const IssueVoucherModal: React.FC<IssueVoucherModalProps> = ({
   };
 
   const parsedCsvList = parseColaboradoresCsv(csvRaw);
-  const unitVal = Math.max(0, Number((mode === 'single' ? singleValor : batchUnitValor).replace(',', '.')) || 0);
+  const unitVal = Math.max(0, parseFormattedBrlToReais(mode === 'single' ? singleValor : batchUnitValor));
 
   const batchItemsPreview =
     mode === 'batch'
@@ -448,13 +450,10 @@ export const IssueVoucherModal: React.FC<IssueVoucherModalProps> = ({
                 </div>
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-medium text-slate-300 mb-1">Valor (R$)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.01"
+                  <BrlCurrencyInput
                     required
-                    value={singleValor}
-                    onChange={(e) => setSingleValor(e.target.value)}
+                    valueText={singleValor}
+                    onChangeText={(val) => setSingleValor(val)}
                     className="w-full h-11 px-3 rounded-xl bg-slate-900 border border-white/15 text-sm font-bold text-white focus:outline-none focus:border-emerald-400"
                   />
                 </div>
@@ -486,12 +485,9 @@ export const IssueVoucherModal: React.FC<IssueVoucherModalProps> = ({
 
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-300">Valor cada (R$):</span>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.01"
-                    value={batchUnitValor}
-                    onChange={(e) => setBatchUnitValor(e.target.value)}
+                  <BrlCurrencyInput
+                    valueText={batchUnitValor}
+                    onChangeText={(val) => setBatchUnitValor(val)}
                     className="w-24 h-10 px-3 rounded-xl bg-slate-900 border border-white/15 text-sm font-bold text-white"
                   />
                 </div>
@@ -749,7 +745,7 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
         id: editingCampaign?.id || null,
         nome: nome.trim(),
         descricao: descricao.trim() || undefined,
-        valor_voucher: Math.max(0, Number(valorVoucher.replace(',', '.')) || 0),
+        valor_voucher: Math.max(0, parseFormattedBrlToReais(valorVoucher)),
         empresa_id: empresaId || null,
         empresa_nome: partner ? partner.nome_fantasia || partner.razao_social : null,
         quantidade_total: Math.max(1, parseInt(quantidadeTotal || '100', 10) || 100),
@@ -811,13 +807,10 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
             </div>
             <div className="sm:col-span-4">
               <label className="block text-xs font-medium text-slate-300 mb-1">Valor Padrão (R$)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
+              <BrlCurrencyInput
                 required
-                value={valorVoucher}
-                onChange={(e) => setValorVoucher(e.target.value)}
+                valueText={valorVoucher}
+                onChangeText={(val) => setValorVoucher(val)}
                 className="w-full h-11 px-3.5 rounded-xl bg-slate-900 border border-white/15 text-sm font-bold text-white"
               />
             </div>
